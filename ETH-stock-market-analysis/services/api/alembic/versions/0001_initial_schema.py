@@ -1,3 +1,4 @@
+
 """Initial schema: instruments + daily_prices (hypertable if timescaledb available).
 
 Revision ID: 0001
@@ -19,6 +20,7 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
+
     bind = op.get_bind()
     has_timescale = bool(
         bind.execute(
@@ -92,3 +94,4 @@ def upgrade() -> None:
 def downgrade() -> None:
     op.drop_table("daily_prices")
     op.drop_table("instruments")
+
