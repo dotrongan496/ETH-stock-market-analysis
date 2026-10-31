@@ -1,4 +1,5 @@
-"""Initial schema: instruments + daily_prices hypertable.
+
+"""Initial schema: instruments + daily_prices (hypertable if timescaledb available).
 
 Revision ID: 0001
 Revises:
@@ -19,7 +20,16 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
-    op.execute("CREATE EXTENSION IF NOT EXISTS timescaledb")
+
+    bind = op.get_bind()
+    has_timescale = bool(
+        bind.execute(
+            sa.text("SELECT 1 FROM pg_available_extensions WHERE name = 'timescaledb'")
+        ).scalar()
+    )
+
+    if has_timescale:
+        op.execute("CREATE EXTENSION IF NOT EXISTS timescaledb")
 
     op.create_table(
         "instruments",
@@ -74,10 +84,11 @@ def upgrade() -> None:
         sa.CheckConstraint("volume >= 0", name="ck_daily_prices_volume_non_negative"),
     )
 
-    op.execute(
-        "SELECT create_hypertable('daily_prices', by_range('trade_date', INTERVAL '1 year'), "
-        "if_not_exists => TRUE)"
-    )
+    if has_timescale:
+        op.execute(
+            "SELECT create_hypertable('daily_prices', by_range('trade_date', INTERVAL '1 year'), "
+            "if_not_exists => TRUE)"
+        )
 
 
 def downgrade() -> None:
