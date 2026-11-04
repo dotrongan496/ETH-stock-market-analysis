@@ -19,7 +19,7 @@ from eth_api.db.repository import DailyBarIn, upsert_daily_prices
 from eth_api.db.session import get_sessionmaker
 from eth_api.logging_config import configure_logging
 from eth_api.seed import _CRYPTO_BASES, _STOCKS
-from pipelines.providers.base import MarketBar
+from pipelines.providers.base import BaseProvider, MarketBar
 from pipelines.providers.binance import BinanceProvider
 from pipelines.providers.vnstock import VNStockProvider
 
@@ -28,8 +28,13 @@ logger = logging.getLogger(__name__)
 
 def fetch_all_watchlist(
     days: int = 30,
+    failures: list[str] | None = None,
 ) -> list[MarketBar]:
-    """Fetch daily bars for 10 VN stocks and 10 Crypto symbols."""
+    """Fetch daily bars for 10 VN stocks and 10 Crypto symbols.
+
+    Symbols that raise an error or return zero bars are appended to `failures`
+    (if provided) so the caller can report them instead of failing silently.
+    """
     end_date = dt.date.today()
     start_date = end_date - dt.timedelta(days=days)
 
@@ -37,23 +42,25 @@ def fetch_all_watchlist(
     vn_provider = VNStockProvider()
 
     all_bars: list[MarketBar] = []
+    failed: list[str] = failures if failures is not None else []
 
-    # 1. Fetch 10 Crypto
-    for base in _CRYPTO_BASES:
-        pair = f"{base}USDT"
-        try:
-            bars = binance_provider.fetch_daily_bars(pair, start_date=start_date, end_date=end_date)
-            all_bars.extend(bars)
-        except Exception as exc:
-            logger.warning("Failed crypto sync for %s: %s", pair, exc)
+    # 1. 10 Crypto (Binance), 2. 10 VN stocks (VCI)
+    jobs: list[tuple[str, BaseProvider]] = [
+        (f"{base}USDT", binance_provider) for base in _CRYPTO_BASES
+    ] + [(symbol, vn_provider) for symbol, _, _ in _STOCKS]
 
-    # 2. Fetch 10 VN stocks
-    for symbol, _, _ in _STOCKS:
+    for symbol, provider in jobs:
         try:
-            bars = vn_provider.fetch_daily_bars(symbol, start_date=start_date, end_date=end_date)
-            all_bars.extend(bars)
+            bars = provider.fetch_daily_bars(symbol, start_date=start_date, end_date=end_date)
         except Exception as exc:
-            logger.warning("Failed stock sync for %s: %s", symbol, exc)
+            logger.warning("Failed %s sync for %s: %s", provider.name, symbol, exc)
+            failed.append(symbol)
+            continue
+        if not bars:
+            logger.warning("%s returned 0 bars for %s", provider.name, symbol)
+            failed.append(symbol)
+            continue
+        all_bars.extend(bars)
 
     return all_bars
 
@@ -106,8 +113,11 @@ def main() -> int:
     configure_logging(get_settings().log_level)
 
     logger.info("Starting market data sync (past %d days)...", args.days)
-    bars = fetch_all_watchlist(days=args.days)
+    failures: list[str] = []
+    bars = fetch_all_watchlist(days=args.days, failures=failures)
     logger.info("Total fetched bars: %d", len(bars))
+    if failures:
+        logger.error("No data for %d symbol(s): %s", len(failures), ", ".join(failures))
 
     if args.output:
         data = [b.model_dump(mode="json") for b in bars]
@@ -117,7 +127,7 @@ def main() -> int:
 
     if args.dry_run:
         logger.info("Dry run requested; DB write skipped.")
-        return 0
+        return 2 if failures else 0
 
     try:
         saved = save_bars_to_db(bars)
@@ -126,9 +136,9 @@ def main() -> int:
         logger.error("Database save failed: %s", exc)
         return 1
 
-    return 0
+    # Non-zero exit so schedulers/CI notice partial failures.
+    return 2 if failures else 0
 
 
 if __name__ == "__main__":
     sys.exit(main())
-

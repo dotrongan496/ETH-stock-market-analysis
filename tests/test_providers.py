@@ -80,35 +80,50 @@ def test_binance_provider_mock() -> None:
 
 def test_vnstock_provider_mock() -> None:
     provider = VNStockProvider()
-    mock_payload = {
-        "data": [
-            {
-                "tradingDate": "2026-01-02",
-                "open": 130.0,
-                "high": 135.0,
-                "low": 128.0,
-                "close": 133.0,
-                "volume": 2500000,
-            }
-        ]
-    }
+    # VCI gap-chart format: parallel arrays, prices in full VND, t = UTC midnight epoch.
+    mock_payload = [
+        {
+            "symbol": "FPT",
+            "o": [130000, 131000],
+            "h": [135000, 132500],
+            "l": [128000, 129800],
+            "c": [133000, 130500.5],
+            "v": [2500000, 1800000],
+            "t": ["1767312000", "1767571200"],  # 2026-01-02, 2026-01-05
+        }
+    ]
 
     mock_resp = MagicMock()
     mock_resp.read.return_value = json.dumps(mock_payload).encode("utf-8")
     mock_resp.__enter__.return_value = mock_resp
 
-    with patch("urllib.request.urlopen", return_value=mock_resp):
+    with patch("urllib.request.urlopen", return_value=mock_resp) as mock_open:
         bars = provider.fetch_daily_bars(
-            symbol="FPT",
+            symbol="fpt",
             start_date=dt.date(2026, 1, 1),
-            end_date=dt.date(2026, 1, 5),
+            end_date=dt.date(2026, 1, 4),
         )
 
+    sent = json.loads(mock_open.call_args.args[0].data)
+    assert sent["symbols"] == ["FPT"]
+    assert sent["timeFrame"] == "ONE_DAY"
+
+    # 2026-01-05 is outside [start, end] and must be filtered out.
     assert len(bars) == 1
     assert bars[0].symbol == "FPT"
     assert bars[0].exchange == "HOSE"
     assert bars[0].trade_date == dt.date(2026, 1, 2)
-    # 133.0 * 1000 = 133000 VND
     assert bars[0].close == Decimal("133000")
-    assert bars[0].source == "tcbs"
+    assert bars[0].source == "vci"
 
+
+def test_vnstock_provider_empty_payload() -> None:
+    provider = VNStockProvider()
+    mock_resp = MagicMock()
+    mock_resp.read.return_value = b"[]"
+    mock_resp.__enter__.return_value = mock_resp
+
+    with patch("urllib.request.urlopen", return_value=mock_resp):
+        bars = provider.fetch_daily_bars("ACV", dt.date(2026, 1, 1), dt.date(2026, 1, 5))
+
+    assert bars == []
