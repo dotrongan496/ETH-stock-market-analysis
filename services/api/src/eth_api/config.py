@@ -17,6 +17,15 @@ class Settings(BaseSettings):
     database_url: str = Field(..., description="SQLAlchemy URL, e.g. postgresql+psycopg://...")
     app_env: Literal["development", "test", "staging", "production"] = "development"
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
+    cors_origins: str = Field(
+        default="http://localhost:3000,http://127.0.0.1:3000",
+        description="Comma-separated browser origins allowed to call the API (apps/web).",
+    )
+
+    @property
+    def cors_origin_list(self) -> list[str]:
+        """`cors_origins` split into a clean list (blank entries dropped)."""
+        return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
 
 
 @lru_cache(maxsize=1)

@@ -39,6 +39,17 @@ uv run python scripts/test_db_connection.py
 # 3. Đồng bộ dữ liệu thị trường
 uv run python -m pipelines.providers.sync --days 30
 
-# 4. Khởi chạy FastAPI Server
+# 4. Khởi chạy FastAPI Server (http://localhost:8000, tài liệu API: /docs)
 uv run --package eth-api uvicorn eth_api.main:create_app --factory --reload --port 8000
+
+# 5. Khởi chạy giao diện web (terminal khác, cần Node 20+ và pnpm)
+pnpm install
+pnpm --filter web dev        # http://localhost:3000
 ```
+
+### API đọc dữ liệu
+
+| Endpoint | Mô tả |
+|---|---|
+| `GET /api/instruments?usd_vnd_rate=25400` | Toàn bộ mã kèm giá đóng cửa mới nhất quy đổi VND và % thay đổi so với phiên trước |
+| `GET /api/prices/{symbol}?interval=1d\|1m&usd_vnd_rate=25400` | Nến OHLCV bằng VND. `1d`: nến ngày, `1m`: gộp theo tháng. Giá USDT nhân với `usd_vnd_rate`, giá VND giữ nguyên, khối lượng không quy đổi |
