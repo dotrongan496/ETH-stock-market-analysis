@@ -78,6 +78,39 @@ def test_binance_provider_mock() -> None:
     assert bars[0].source == "binance"
 
 
+def test_binance_provider_paginates_past_limit() -> None:
+    """Ranges longer than 1000 days must be fetched in several requests."""
+    provider = BinanceProvider()
+    day_ms = 86_400_000
+    start = dt.date(2022, 1, 1)
+    first_ms = int(dt.datetime(2022, 1, 1, tzinfo=dt.UTC).timestamp() * 1000)
+    total = 1200
+
+    def kline(i: int) -> list:
+        return [first_ms + i * day_ms, "1", "2", "0.5", "1.5", "10", first_ms + (i + 1) * day_ms - 1]
+
+    pages = [[kline(i) for i in range(1000)], [kline(i) for i in range(1000, total)]]
+    responses = []
+    for page in pages:
+        resp = MagicMock()
+        resp.read.return_value = json.dumps(page).encode("utf-8")
+        resp.__enter__.return_value = resp
+        responses.append(resp)
+
+    with patch("urllib.request.urlopen", side_effect=responses) as mock_open:
+        bars = provider.fetch_daily_bars(
+            "BTCUSDT", start_date=start, end_date=start + dt.timedelta(days=total - 1)
+        )
+
+    assert mock_open.call_count == 2
+    second_url = mock_open.call_args_list[1].args[0].full_url
+    assert f"startTime={first_ms + 999 * day_ms + 1}" in second_url
+    assert len(bars) == total
+    assert bars[0].trade_date == start
+    assert bars[-1].trade_date == start + dt.timedelta(days=total - 1)
+    assert len({b.trade_date for b in bars}) == total
+
+
 def test_vnstock_provider_mock() -> None:
     provider = VNStockProvider()
     # VCI gap-chart format: parallel arrays, prices in full VND, t = UTC midnight epoch.
