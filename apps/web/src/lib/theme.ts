@@ -7,7 +7,7 @@ import { THEME_STORAGE_KEY as STORAGE_KEY } from "@/lib/theme-script";
 
 export type Theme = "light" | "dark";
 
-const THEME_COLOR: Record<Theme, string> = { dark: "#0b0e14", light: "#f3f5f8" };
+const THEME_COLOR: Record<Theme, string> = { dark: "#0b0e14", light: "#e8ebef" };
 
 function storedTheme(): Theme | null {
   try {

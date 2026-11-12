@@ -55,11 +55,11 @@ const CHROME: Record<
     label: "#1f2735",
   },
   light: {
-    background: "#f3f5f8",
-    text: "#5b6578",
-    grid: "rgba(15, 23, 42, 0.06)",
-    border: "#e1e5eb",
-    crosshair: "#94a3b8",
+    background: "#e8ebef",
+    text: "#586272",
+    grid: "rgba(15, 23, 42, 0.07)",
+    border: "#d6dbe2",
+    crosshair: "#8a94a6",
     label: "#334155",
   },
 };

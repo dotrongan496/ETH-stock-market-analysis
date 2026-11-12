@@ -29,17 +29,18 @@
 
 :root[data-theme="light"] {
   color-scheme: light;
-  --scrollbar: #c5ccd6;
-  --color-canvas: #f3f5f8;
-  --color-panel: #fafbfc;
-  --color-raised: #ffffff;
-  --color-line: #e1e5eb;
-  --color-ink: #0f172a;
-  --color-muted: #5b6578;
-  --color-accent: #2563eb;
-  --color-up: #16a34a;
-  --color-down: #dc2626;
-  --color-flat: #ca8a04;
+  /* Soft "paper" palette: no pure white, gentler text contrast, to avoid glare. */
+  --scrollbar: #bfc6d0;
+  --color-canvas: #e8ebef;
+  --color-panel: #eff1f4;
+  --color-raised: #f6f7f9;
+  --color-line: #d6dbe2;
+  --color-ink: #1f2733;
+  --color-muted: #586272;
+  --color-accent: #2b5fd9;
+  --color-up: #15803d;
+  --color-down: #c62828;
+  --color-flat: #a16207;
 }
 
 body {
@@ -86,18 +87,18 @@ body {
 }
 
 :root[data-theme="light"] .rocker {
-  --plate-top: #ffffff;
-  --plate-bottom: #eef1f5;
-  --plate-edge: #d3d9e2;
-  --paddle: #fdfdfe;
-  --paddle-edge: #d6dce5;
+  --plate-top: #f6f7f9;
+  --plate-bottom: #e4e8ed;
+  --plate-edge: #cfd5de;
+  --paddle: #f3f5f7;
+  --paddle-edge: #d0d6df;
   --mark: #9aa3b2;
   --lamp: #ff6a1a;
   --lamp-glow: rgb(255 106 26 / 0.75);
   --tilt: 16deg; /* top ("I") pressed in */
 
   box-shadow:
-    inset 0 1px 0 #ffffff,
+    inset 0 1px 0 rgb(255 255 255 / 0.7),
     0 1px 3px rgb(15 23 42 / 0.12);
 }
 
