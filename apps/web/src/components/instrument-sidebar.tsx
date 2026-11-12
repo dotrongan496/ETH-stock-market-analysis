@@ -1,4 +1,5 @@
 import ChangeBadge from "@/components/change-badge";
+import ThemeSwitch from "@/components/theme-switch";
 import type { AssetClass, Instrument } from "@/lib/api";
 import { formatVnd } from "@/lib/format";
 import { baseSymbol, subtitle } from "@/lib/instrument";
@@ -36,6 +37,9 @@ export default function InstrumentSidebar({
         <div className="leading-tight">
           <div className="text-sm font-semibold">ETH Market</div>
           <div className="text-xs text-muted">Giá quy đổi sang VND</div>
+        </div>
+        <div className="ml-auto">
+          <ThemeSwitch />
         </div>
       </div>
 
