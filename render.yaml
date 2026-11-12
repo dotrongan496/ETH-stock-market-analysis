@@ -1,0 +1,31 @@
+# Render Blueprint: deploy FastAPI (services/api) lên Render.
+# Dashboard Render -> New -> Blueprint -> chọn repo này. Render sẽ hỏi giá trị
+# cho các biến có `sync: false` (DATABASE_URL, CORS_ORIGINS).
+services:
+  - type: web
+    name: eth-api
+    runtime: python
+    plan: free
+    region: singapore
+    branch: main
+    autoDeploy: true
+    # Repo là uv workspace: cài đúng package eth-api từ uv.lock, bỏ nhóm dev.
+    buildCommand: pip install uv && uv sync --package eth-api --frozen --no-dev
+    startCommand: .venv/bin/uvicorn eth_api.main:create_app --factory --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.11
+      # Dùng Python của Render; Python do uv tự tải sẽ không còn ở runtime.
+      - key: UV_PYTHON_DOWNLOADS
+        value: never
+      - key: APP_ENV
+        value: production
+      - key: LOG_LEVEL
+        value: INFO
+      # Supabase Session pooler, dạng postgresql+psycopg://...?sslmode=require
+      - key: DATABASE_URL
+        sync: false
+      # Ví dụ: https://yourdomain.com,https://www.yourdomain.com
+      - key: CORS_ORIGINS
+        sync: false
