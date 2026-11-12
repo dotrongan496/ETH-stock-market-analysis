@@ -53,3 +53,25 @@ pnpm --filter web dev        # http://localhost:3000
 |---|---|
 | `GET /api/instruments?usd_vnd_rate=25400` | Toàn bộ mã kèm giá đóng cửa mới nhất quy đổi VND và % thay đổi so với phiên trước |
 | `GET /api/prices/{symbol}?interval=1d\|1m&usd_vnd_rate=25400` | Nến OHLCV bằng VND. `1d`: nến ngày, `1m`: gộp theo tháng. Giá USDT nhân với `usd_vnd_rate`, giá VND giữ nguyên, khối lượng không quy đổi |
+
+## Deploy lên tên miền riêng
+
+```
+yourdomain.com, www.yourdomain.com  →  Vercel  (apps/web)
+api.yourdomain.com                  →  Render  (services/api, cấu hình trong render.yaml)
+                                         └→ Supabase Postgres
+```
+
+1. **API (Render)**: Dashboard → *New → Blueprint* → chọn repo. Điền `DATABASE_URL` (Supabase Session pooler) và `CORS_ORIGINS=https://yourdomain.com,https://www.yourdomain.com`. Kiểm tra `https://<service>.onrender.com/health/ready`, rồi *Settings → Custom Domains* thêm `api.yourdomain.com`.
+2. **Web (Vercel)**: *Add New → Project* → chọn repo, **Root Directory** = `apps/web`, biến môi trường `NEXT_PUBLIC_API_BASE_URL=https://api.yourdomain.com` (giá trị được gắn lúc build: đổi biến thì phải Redeploy). *Settings → Domains* thêm `yourdomain.com` và `www.yourdomain.com`.
+3. **DNS** (tại nhà đăng ký tên miền), chép đúng giá trị Vercel/Render hiển thị:
+
+   | Type | Name | Value |
+   |---|---|---|
+   | A | `@` | IP do Vercel cung cấp (thường `76.76.21.21`) |
+   | CNAME | `www` | `cname.vercel-dns.com` |
+   | CNAME | `api` | `<service>.onrender.com` |
+
+   Dùng Cloudflare DNS thì để bản ghi `api` ở chế độ *DNS only*. HTTPS được cấp tự động sau khi DNS cập nhật.
+
+Lỗi CORS trên trình duyệt: kiểm tra `CORS_ORIGINS` có đúng `https://...`, không có `/` ở cuối. Gói free của Render ngủ sau 15 phút không có truy cập (lần gọi đầu chậm ~30–50 giây).
