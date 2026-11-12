@@ -3,7 +3,7 @@
 # cho các biến có `sync: false` (DATABASE_URL, CORS_ORIGINS).
 services:
   - type: web
-    name: eth-api
+    name: ethmarket
     runtime: python
     plan: free
     region: singapore
