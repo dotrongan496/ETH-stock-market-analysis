@@ -8,6 +8,8 @@ import {
   TickMarkType,
   createChart,
   type CandlestickData,
+  type ChartOptions,
+  type DeepPartial,
   type HistogramData,
   type IChartApi,
   type ISeriesApi,
@@ -17,6 +19,7 @@ import {
 import { useEffect, useEffectEvent, useRef } from "react";
 
 import type { Interval, PriceBar, PriceSeries } from "@/lib/api";
+import { currentTheme, useTheme, type Theme } from "@/lib/theme";
 import {
   formatDay,
   formatMonth,
@@ -30,18 +33,48 @@ export type RangeKey = "3M" | "6M" | "1Y" | "ALL";
 
 const RANGE_MONTHS: Record<Exclude<RangeKey, "ALL">, number> = { "3M": 3, "6M": 6, "1Y": 12 };
 
+// Candle colors are the same in both themes; the chart chrome follows the theme.
 const COLORS = {
-  background: "#0b0e14",
-  text: "#8b95a7",
-  grid: "rgba(148, 163, 184, 0.07)",
-  border: "#1e2431",
-  crosshair: "#64748b",
-  crosshairLabel: "#1f2735",
   up: "#22c55e",
   down: "#ef4444",
   upVolume: "rgba(34, 197, 94, 0.5)",
   downVolume: "rgba(239, 68, 68, 0.5)",
 } as const;
+
+/** Chart chrome per theme, matching the CSS tokens in globals.css. */
+const CHROME: Record<
+  Theme,
+  { background: string; text: string; grid: string; border: string; crosshair: string; label: string }
+> = {
+  dark: {
+    background: "#0b0e14",
+    text: "#8b95a7",
+    grid: "rgba(148, 163, 184, 0.07)",
+    border: "#1e2431",
+    crosshair: "#64748b",
+    label: "#1f2735",
+  },
+  light: {
+    background: "#f3f5f8",
+    text: "#5b6578",
+    grid: "rgba(15, 23, 42, 0.06)",
+    border: "#e1e5eb",
+    crosshair: "#94a3b8",
+    label: "#334155",
+  },
+};
+
+function chromeOptions(theme: Theme): DeepPartial<ChartOptions> {
+  const c = CHROME[theme];
+  const line = { color: c.crosshair, labelBackgroundColor: c.label };
+  return {
+    layout: { background: { type: ColorType.Solid, color: c.background }, textColor: c.text },
+    grid: { vertLines: { color: c.grid }, horzLines: { color: c.grid } },
+    rightPriceScale: { borderColor: c.border },
+    timeScale: { borderColor: c.border },
+    crosshair: { vertLine: line, horzLine: line },
+  };
+}
 
 /** lightweight-charts may hand back a string, a BusinessDay or a UTC timestamp. */
 function timeToIso(time: Time): string {
@@ -127,6 +160,7 @@ export default function PriceChart({ series, range }: PriceChartProps) {
   const candlesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
   const volumeRef = useRef<ISeriesApi<"Histogram"> | null>(null);
   const shownRef = useRef<{ key: string; bars: PriceBar[]; interval: Interval } | null>(null);
+  const theme = useTheme();
 
   const applyRangeToShown = useEffectEvent(() => {
     const chart = chartRef.current;
@@ -181,28 +215,21 @@ export default function PriceChart({ series, range }: PriceChartProps) {
     const chart = createChart(container, {
       autoSize: true,
       layout: {
-        background: { type: ColorType.Solid, color: COLORS.background },
-        textColor: COLORS.text,
         fontSize: 12,
         fontFamily: getComputedStyle(container).fontFamily,
         attributionLogo: true,
       },
-      grid: { vertLines: { color: COLORS.grid }, horzLines: { color: COLORS.grid } },
-      rightPriceScale: { borderColor: COLORS.border, scaleMargins: { top: 0.08, bottom: 0.26 } },
+      rightPriceScale: { scaleMargins: { top: 0.08, bottom: 0.26 } },
       timeScale: {
-        borderColor: COLORS.border,
         rightOffset: 4,
         minBarSpacing: 0.5,
         tickMarkFormatter,
       },
-      crosshair: {
-        mode: CrosshairMode.Normal,
-        vertLine: { color: COLORS.crosshair, labelBackgroundColor: COLORS.crosshairLabel },
-        horzLine: { color: COLORS.crosshair, labelBackgroundColor: COLORS.crosshairLabel },
-      },
+      crosshair: { mode: CrosshairMode.Normal },
       localization: { locale: "vi-VN", timeFormatter: (time: Time) => formatTimeLabel(time, "1d") },
       kineticScroll: { mouse: true, touch: true },
     });
+    chart.applyOptions(chromeOptions(currentTheme()));
 
     const candles = chart.addSeries(CandlestickSeries, {
       upColor: COLORS.up,
@@ -269,6 +296,11 @@ export default function PriceChart({ series, range }: PriceChartProps) {
     if (keepView) chart.timeScale().setVisibleLogicalRange(keepView);
     else applyRangeToShown();
   }, [series]);
+
+  // Theme switch flipped.
+  useEffect(() => {
+    if (theme) chartRef.current?.applyOptions(chromeOptions(theme));
+  }, [theme]);
 
   // Range buttons (3T / 6T / 1N / Tất cả).
   useEffect(() => {
