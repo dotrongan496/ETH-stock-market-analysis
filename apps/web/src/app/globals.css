@@ -25,6 +25,12 @@
 :root {
   color-scheme: dark;
   --scrollbar: #2a3242;
+  /* Line colors of the comparison chart (components/compare-chart.tsx), slot 0 = main symbol. */
+  --series-0: #60a5fa;
+  --series-1: #f59e0b;
+  --series-2: #c084fc;
+  --series-3: #2dd4bf;
+  --series-4: #f472b6;
 }
 
 :root[data-theme="light"] {
@@ -41,6 +47,11 @@
   --color-up: #15803d;
   --color-down: #c62828;
   --color-flat: #a16207;
+  --series-0: #2b5fd9;
+  --series-1: #c2410c;
+  --series-2: #7c3aed;
+  --series-3: #0f766e;
+  --series-4: #be185d;
 }
 
 body {

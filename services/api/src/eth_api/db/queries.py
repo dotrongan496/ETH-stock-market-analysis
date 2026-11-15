@@ -35,6 +35,7 @@ class InstrumentQuote:
     last_trade_date: dt.date | None
     last_close: Decimal | None
     prev_close: Decimal | None
+    last_volume: Decimal | None = None
 
 
 _INSTRUMENT_COLUMNS = (
@@ -55,14 +56,14 @@ def build_latest_closes_query(sessions: int = 2) -> Select[Any]:
     Instruments without any bar are kept (outer join, NULL date/close).
     """
     recent = (
-        select(DailyPrice.trade_date, DailyPrice.close)
+        select(DailyPrice.trade_date, DailyPrice.close, DailyPrice.volume)
         .where(DailyPrice.instrument_id == Instrument.id)
         .order_by(DailyPrice.trade_date.desc())
         .limit(sessions)
         .lateral("recent")
     )
     return (
-        select(*_INSTRUMENT_COLUMNS, recent.c.trade_date, recent.c.close)
+        select(*_INSTRUMENT_COLUMNS, recent.c.trade_date, recent.c.close, recent.c.volume)
         .select_from(Instrument)
         .outerjoin(recent, true())
         .where(Instrument.is_active.is_(True))
@@ -108,19 +109,19 @@ def _instrument_from_row(row: Any) -> InstrumentInfo:
 
 
 def group_latest_closes(rows: Iterable[Any]) -> list[InstrumentQuote]:
-    """Fold rows of (instrument columns..., trade_date, close) into one quote per instrument.
+    """Fold rows of (instrument columns..., trade_date, close, volume) into one quote each.
 
     Instrument order follows the rows; closes are re-sorted newest first, so the
     result does not depend on the database returning them in any order.
     """
     instruments: dict[int, InstrumentInfo] = {}
-    closes: dict[int, list[tuple[dt.date, Decimal]]] = {}
+    closes: dict[int, list[tuple[dt.date, Decimal, Decimal | None]]] = {}
     for row in rows:
         if row.id not in instruments:
             instruments[row.id] = _instrument_from_row(row)
             closes[row.id] = []
         if row.trade_date is not None and row.close is not None:
-            closes[row.id].append((row.trade_date, row.close))
+            closes[row.id].append((row.trade_date, row.close, getattr(row, "volume", None)))
 
     quotes: list[InstrumentQuote] = []
     for inst_id, info in instruments.items():
@@ -131,6 +132,7 @@ def group_latest_closes(rows: Iterable[Any]) -> list[InstrumentQuote]:
                 last_trade_date=recent[0][0] if recent else None,
                 last_close=recent[0][1] if recent else None,
                 prev_close=recent[1][1] if len(recent) > 1 else None,
+                last_volume=recent[0][2] if recent else None,
             )
         )
     return quotes

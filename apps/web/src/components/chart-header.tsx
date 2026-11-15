@@ -3,9 +3,11 @@
 import { useState, type ReactNode } from "react";
 
 import ChangeBadge from "@/components/change-badge";
+import ComparePicker from "@/components/compare-picker";
 import NumberWheel, { type WheelOption } from "@/components/number-wheel";
 import SegmentedControl, { type SegmentOption } from "@/components/segmented-control";
 import type { Instrument, Interval } from "@/lib/api";
+import type { CompareSlot } from "@/lib/compare";
 import { formatDay, formatNumber, formatVnd, quoteDecimals } from "@/lib/format";
 import { displayName, exchangeLabel } from "@/lib/instrument";
 import {
@@ -65,6 +67,11 @@ interface ChartHeaderProps {
   onRangeChange: (value: ChartRange) => void;
   /** Years of data for the shown instrument: length of the "Năm" wheel. */
   maxYears: number;
+  instruments: Instrument[] | null;
+  compare: ReadonlyArray<CompareSlot>;
+  onCompareAdd: (symbol: string) => void;
+  onCompareRemove: (symbol: string) => void;
+  onCompareClear: () => void;
 }
 
 export default function ChartHeader({
@@ -78,10 +85,27 @@ export default function ChartHeader({
   range,
   onRangeChange,
   maxYears,
+  instruments,
+  compare,
+  onCompareAdd,
+  onCompareRemove,
+  onCompareClear,
 }: ChartHeaderProps) {
   return (
     <header className="flex flex-wrap items-end justify-between gap-x-6 gap-y-4 border-b border-line px-4 py-4 sm:px-5">
-      <InstrumentSummary instrument={instrument} appliedRate={appliedRate} />
+      <div className="min-w-0">
+        <InstrumentSummary instrument={instrument} appliedRate={appliedRate} />
+        {instrument && (
+          <ComparePicker
+            instruments={instruments}
+            main={instrument}
+            compare={compare}
+            onAdd={onCompareAdd}
+            onRemove={onCompareRemove}
+            onClear={onCompareClear}
+          />
+        )}
+      </div>
       <div className="flex flex-wrap items-start gap-3">
         <RateInput value={rateInput} valid={rateValid} onChange={onRateInput} />
         <Field label="Khung nến">

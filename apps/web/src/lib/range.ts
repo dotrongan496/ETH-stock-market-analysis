@@ -39,24 +39,30 @@ export function yearsSpanned(bars: PriceBar[]): number {
 }
 
 /**
- * Index of the first bar inside `range`, the window ending at the latest bar.
+ * Test for "is this bar inside `range`", the window ending at the bar dated `last`.
  * Daily candles: bars after the same date N units back (calendar time, so "7 ngày" is
  * about 5 trading sessions for stocks). Monthly candles: the last N months.
  */
-export function rangeStartIndex(bars: PriceBar[], interval: Interval, range: ChartRange): number {
-  if (bars.length === 0 || range.count === "all") return 0;
-  const last = bars[bars.length - 1].time;
+export function rangeFilter(
+  last: string,
+  interval: Interval,
+  range: ChartRange,
+): (time: string) => boolean {
+  if (range.count === "all") return () => true;
   const months = range.unit === "year" ? range.count * 12 : range.count;
-
-  let inRange: (time: string) => boolean;
   if (interval === "1m") {
     // Monthly bars are dated on the 1st; a day window keeps just the latest month.
     const from = range.unit === "day" ? last : shiftMonths(last, -(months - 1));
-    inRange = (time) => time >= from;
-  } else {
-    const from = range.unit === "day" ? shiftDays(last, -range.count) : shiftMonths(last, -months);
-    inRange = (time) => time > from;
+    return (time) => time >= from;
   }
+  const from = range.unit === "day" ? shiftDays(last, -range.count) : shiftMonths(last, -months);
+  return (time) => time > from;
+}
+
+/** Index of the first bar inside `range`, the window ending at the latest bar. */
+export function rangeStartIndex(bars: PriceBar[], interval: Interval, range: ChartRange): number {
+  if (bars.length === 0) return 0;
+  const inRange = rangeFilter(bars[bars.length - 1].time, interval, range);
   const index = bars.findIndex((bar) => inRange(bar.time));
   return index === -1 ? bars.length - 1 : index;
 }
