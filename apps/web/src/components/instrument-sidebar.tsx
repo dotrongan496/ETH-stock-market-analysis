@@ -48,6 +48,8 @@ interface InstrumentSidebarProps {
   onStockViewChange: (view: StockView) => void;
   selected: string | null;
   onSelect: (symbol: string) => void;
+  /** Pointer / focus resting on a row (null when it leaves): load that chart ahead of a click. */
+  onPrefetch?: (symbol: string | null) => void;
   onRetry: () => void;
 }
 
@@ -60,6 +62,7 @@ export default function InstrumentSidebar({
   onStockViewChange,
   selected,
   onSelect,
+  onPrefetch,
   onRetry,
 }: InstrumentSidebarProps) {
   const [query, setQuery] = useState("");
@@ -132,6 +135,7 @@ export default function InstrumentSidebar({
       showTurnover={showTurnover}
       limits={marketView ? instrumentLimits(item) : null}
       onSelect={() => choose(item)}
+      onIntent={(resting) => onPrefetch?.(resting ? item.symbol : null)}
       onKeyDown={onRowKey}
     />
   );
@@ -447,6 +451,7 @@ function InstrumentRow({
   showTurnover,
   limits,
   onSelect,
+  onIntent,
   onKeyDown,
 }: {
   item: Instrument;
@@ -456,6 +461,8 @@ function InstrumentRow({
   /** "Thị trường" view: latest session's limits, used for board colors. */
   limits: PriceLimits | null;
   onSelect: () => void;
+  /** true when the pointer or focus rests on the row, false when it leaves. */
+  onIntent: (resting: boolean) => void;
   onKeyDown: (event: KeyboardEvent<HTMLButtonElement>) => void;
 }) {
   const name = baseSymbol(item);
@@ -466,6 +473,10 @@ function InstrumentRow({
         type="button"
         data-row
         onClick={onSelect}
+        onPointerEnter={() => onIntent(true)}
+        onPointerLeave={() => onIntent(false)}
+        onFocus={() => onIntent(true)}
+        onBlur={() => onIntent(false)}
         onKeyDown={onKeyDown}
         aria-current={active ? "true" : undefined}
         className={`flex w-full items-center justify-between gap-3 rounded-md py-2 pl-8 pr-2.5 text-left transition-colors focus-visible:outline-2 focus-visible:outline-accent ${

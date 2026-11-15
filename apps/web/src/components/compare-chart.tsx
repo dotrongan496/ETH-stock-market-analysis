@@ -177,7 +177,9 @@ export default function CompareChart({ entries, interval, range, onRemove, onRet
                       Lỗi · thử lại
                     </button>
                   ) : !entry.series ? (
-                    <span className="text-muted">Đang tải…</span>
+                    <span className="inline-block h-2.5 w-10 animate-pulse rounded-sm bg-muted/25 align-middle">
+                      <span className="sr-only">Đang tải…</span>
+                    </span>
                   ) : point ? (
                     <span
                       className={
