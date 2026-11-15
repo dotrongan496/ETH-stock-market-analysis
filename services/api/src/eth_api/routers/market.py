@@ -74,6 +74,7 @@ def list_instruments(
                 last_trade_date=quote.last_trade_date,
                 last_close=float(quote.last_close) if quote.last_close is not None else None,
                 last_close_vnd=float(last_close_vnd) if last_close_vnd is not None else None,
+                prev_close=float(quote.prev_close) if quote.prev_close is not None else None,
                 change_pct=round(float(change), 4) if change is not None else None,
                 last_volume=float(quote.last_volume) if quote.last_volume is not None else None,
                 turnover_vnd=float(turnover) if turnover is not None else None,

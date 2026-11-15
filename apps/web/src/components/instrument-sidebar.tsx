@@ -5,8 +5,15 @@ import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import ChangeBadge from "@/components/change-badge";
 import ThemeSwitch from "@/components/theme-switch";
 import type { AssetClass, Instrument } from "@/lib/api";
-import { formatCompactVnd, formatVnd } from "@/lib/format";
+import { formatCompactVnd, formatPrice, formatVnd } from "@/lib/format";
 import { baseSymbol, subtitle } from "@/lib/instrument";
+import {
+  STATE_TEXT,
+  instrumentLimits,
+  priceState,
+  type PriceLimits,
+  type StockView,
+} from "@/lib/price-limits";
 import {
   SORT_OPTIONS,
   favorites,
@@ -18,18 +25,27 @@ import {
   type SortKey,
 } from "@/lib/watchlist";
 
-const TABS: ReadonlyArray<{ value: AssetClass; label: string }> = [
-  { value: "stock", label: "Cổ phiếu VN" },
-  { value: "crypto", label: "Crypto" },
+const STOCK_VIEWS: ReadonlyArray<{ value: StockView; label: string }> = [
+  { value: "value", label: "Giá trị" },
+  { value: "market", label: "Thị trường" },
 ];
 
 const ROW_SELECTOR = "#instrument-list [data-row]";
+
+function tabClass(active: boolean): string {
+  return `flex w-full items-center justify-center gap-1.5 rounded-md py-1.5 text-sm font-medium transition-colors focus-visible:outline-2 focus-visible:outline-accent ${
+    active ? "bg-raised text-ink shadow-sm shadow-black/40" : "text-muted hover:text-ink"
+  }`;
+}
 
 interface InstrumentSidebarProps {
   instruments: Instrument[] | null;
   error: string | null;
   tab: AssetClass;
   onTabChange: (tab: AssetClass) => void;
+  /** View of the "Cổ phiếu VN" tab; choosing one also opens that tab. */
+  stockView: StockView;
+  onStockViewChange: (view: StockView) => void;
   selected: string | null;
   onSelect: (symbol: string) => void;
   onRetry: () => void;
@@ -40,6 +56,8 @@ export default function InstrumentSidebar({
   error,
   tab,
   onTabChange,
+  stockView,
+  onStockViewChange,
   selected,
   onSelect,
   onRetry,
@@ -57,7 +75,8 @@ export default function InstrumentSidebar({
   const isStarred = (item: Instrument) => starred.includes(instrumentId(item));
   const pinned = searching ? [] : pool.filter(isStarred);
   const rest = searching ? pool : pool.filter((item) => !isStarred(item));
-  const showTurnover = sort === "turnover" && !searching;
+  const marketView = stockView === "market";
+  const showTurnover = sort === "turnover" && !searching && !(marketView && tab === "stock");
 
   // "/" jumps to the search box, as on most sites.
   useEffect(() => {
@@ -111,6 +130,7 @@ export default function InstrumentSidebar({
       active={item.symbol === selected}
       starred={isStarred(item)}
       showTurnover={showTurnover}
+      limits={marketView ? instrumentLimits(item) : null}
       onSelect={() => choose(item)}
       onKeyDown={onRowKey}
     />
@@ -134,32 +154,28 @@ export default function InstrumentSidebar({
         aria-label="Nhóm tài sản"
         className="mx-3 mb-2 grid grid-cols-2 gap-1 rounded-lg bg-canvas p-1"
       >
-        {TABS.map(({ value, label }) => {
-          const active = value === tab && !searching;
-          const count = instruments?.filter((item) => item.asset_class === value).length;
-          return (
-            <button
-              key={value}
-              id={`tab-${value}`}
-              type="button"
-              role="tab"
-              aria-selected={active}
-              aria-controls="instrument-list"
-              onClick={() => {
-                setQuery("");
-                onTabChange(value);
-              }}
-              className={`flex items-center justify-center gap-1.5 rounded-md py-1.5 text-sm font-medium transition-colors focus-visible:outline-2 focus-visible:outline-accent ${
-                active ? "bg-raised text-ink shadow-sm shadow-black/40" : "text-muted hover:text-ink"
-              }`}
-            >
-              {label}
-              {count !== undefined && (
-                <span className="text-xs font-normal text-muted tabular-nums">{count}</span>
-              )}
-            </button>
-          );
-        })}
+        <StockTab
+          active={tab === "stock" && !searching}
+          view={stockView}
+          onChoose={(view) => {
+            setQuery("");
+            onStockViewChange(view);
+          }}
+        />
+        <button
+          id="tab-crypto"
+          type="button"
+          role="tab"
+          aria-selected={tab === "crypto" && !searching}
+          aria-controls="instrument-list"
+          onClick={() => {
+            setQuery("");
+            onTabChange("crypto");
+          }}
+          className={tabClass(tab === "crypto" && !searching)}
+        >
+          Crypto
+        </button>
       </div>
 
       <div className="mx-3 mb-2 flex gap-1.5">
@@ -221,7 +237,13 @@ export default function InstrumentSidebar({
       </div>
 
       <div className="flex justify-between px-4 pb-1 text-[11px] font-medium uppercase tracking-wide text-muted">
-        <span>{searching ? `Kết quả · ${pool.length}` : "Mã"}</span>
+        <span>
+          {searching
+            ? `Kết quả · ${pool.length}`
+            : marketView && tab === "stock"
+              ? "Mã · Trần / Sàn / TC"
+              : "Mã"}
+        </span>
         <span>{showTurnover ? "Giá · GTGD phiên" : "Giá (VND) · Thay đổi"}</span>
       </div>
 
@@ -272,11 +294,182 @@ export default function InstrumentSidebar({
   );
 }
 
+/**
+ * "Cổ phiếu VN" tab with a menu below it: hover with the mouse (tap on touch screens, ↓ on the
+ * keyboard) to pick "Giá trị" or "Thị trường". Clicking the tab itself opens "Giá trị".
+ */
+function StockTab({
+  active,
+  view,
+  onChoose,
+}: {
+  active: boolean;
+  view: StockView;
+  onChoose: (view: StockView) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const closeTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const lastPointer = useRef("mouse");
+
+  const show = () => {
+    clearTimeout(closeTimer.current);
+    setOpen(true);
+  };
+  // Short delay so the pointer can travel from the tab into the menu.
+  const hideSoon = () => {
+    clearTimeout(closeTimer.current);
+    closeTimer.current = setTimeout(() => setOpen(false), 150);
+  };
+  useEffect(() => () => clearTimeout(closeTimer.current), []);
+
+  // Tap outside / Escape closes it (touch and keyboard users have no "pointer leave").
+  useEffect(() => {
+    if (!open) return;
+    const onPointer = (event: PointerEvent) => {
+      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
+    };
+    const onKey = (event: globalThis.KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      setOpen(false);
+      rootRef.current?.querySelector<HTMLElement>('[role="tab"]')?.focus();
+    };
+    document.addEventListener("pointerdown", onPointer);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("pointerdown", onPointer);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  const items = () =>
+    Array.from(rootRef.current?.querySelectorAll<HTMLElement>('[role="menuitemradio"]') ?? []);
+  const openWithKeyboard = () => {
+    show();
+    requestAnimationFrame(() => items()[STOCK_VIEWS.findIndex((v) => v.value === view)]?.focus());
+  };
+  const onItemKey = (event: KeyboardEvent<HTMLButtonElement>) => {
+    if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+    event.preventDefault();
+    const list = items();
+    const index = list.indexOf(event.currentTarget);
+    const step = event.key === "ArrowDown" ? 1 : -1;
+    list[(index + step + list.length) % list.length]?.focus();
+  };
+
+  return (
+    <div
+      ref={rootRef}
+      role="presentation"
+      className="relative"
+      onPointerEnter={(event) => event.pointerType === "mouse" && show()}
+      onPointerLeave={(event) => event.pointerType === "mouse" && hideSoon()}
+    >
+      <button
+        id="tab-stock"
+        type="button"
+        role="tab"
+        aria-selected={active}
+        aria-controls="instrument-list"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onPointerDown={(event) => {
+          lastPointer.current = event.pointerType;
+        }}
+        onClick={() => {
+          onChoose("value");
+          // Mouse: the hover menu has done its job. Touch: show it so "Thị trường" is reachable.
+          setOpen(lastPointer.current !== "mouse");
+          lastPointer.current = "mouse";
+        }}
+        onKeyDown={(event) => {
+          if (event.key === "ArrowDown") {
+            event.preventDefault();
+            openWithKeyboard();
+          }
+        }}
+        className={tabClass(active)}
+      >
+        Cổ phiếu VN
+        <svg
+          viewBox="0 0 12 12"
+          aria-hidden
+          className={`size-3 text-muted transition-transform ${open ? "rotate-180" : ""}`}
+        >
+          <path d="M3 4.5l3 3 3-3" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      </button>
+
+      {open && (
+        <div
+          role="menu"
+          aria-label="Kiểu xem cổ phiếu"
+          // pt-1.5 instead of a margin: no gap where the pointer would "leave" the tab.
+          className="absolute left-0 top-full z-30 w-60 pt-1.5"
+        >
+          <div className="rounded-lg border border-line bg-panel p-1 shadow-xl shadow-black/40">
+            {STOCK_VIEWS.map((option) => {
+              const checked = active && view === option.value;
+              return (
+                <button
+                  key={option.value}
+                  type="button"
+                  role="menuitemradio"
+                  aria-checked={checked}
+                  onClick={() => {
+                    onChoose(option.value);
+                    setOpen(false);
+                  }}
+                  onKeyDown={onItemKey}
+                  className={`flex w-full items-start gap-2.5 rounded-md px-2.5 py-2 text-left transition-colors hover:bg-raised focus-visible:bg-raised focus-visible:outline-none ${
+                    checked ? "bg-raised/70" : ""
+                  }`}
+                >
+                  <span
+                    aria-hidden
+                    className={`mt-1 grid size-3.5 shrink-0 place-items-center rounded-full border ${
+                      checked ? "border-accent bg-accent" : "border-line"
+                    }`}
+                  >
+                    {checked && <span className="size-1.5 rounded-full bg-canvas" />}
+                  </span>
+                  <span className="min-w-0">
+                    <span className="block text-sm font-medium text-ink">{option.label}</span>
+                    {option.value === "value" ? (
+                      <span className="block text-xs text-muted">Biểu đồ nến, so sánh nhiều mã</span>
+                    ) : (
+                      <span className="flex flex-wrap gap-x-2 text-xs text-muted">
+                        <Swatch className="bg-ceil" label="Trần" />
+                        <Swatch className="bg-floor" label="Sàn" />
+                        <Swatch className="bg-flat" label="Tham chiếu" />
+                      </span>
+                    )}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Swatch({ className, label }: { className: string; label: string }) {
+  return (
+    <span className="inline-flex items-center gap-1">
+      <span aria-hidden className={`size-2 rounded-full ${className}`} />
+      {label}
+    </span>
+  );
+}
+
 function InstrumentRow({
   item,
   active,
   starred,
   showTurnover,
+  limits,
   onSelect,
   onKeyDown,
 }: {
@@ -284,10 +477,13 @@ function InstrumentRow({
   active: boolean;
   starred: boolean;
   showTurnover: boolean;
+  /** "Thị trường" view: latest session's limits, used for board colors. */
+  limits: PriceLimits | null;
   onSelect: () => void;
   onKeyDown: (event: KeyboardEvent<HTMLButtonElement>) => void;
 }) {
   const name = baseSymbol(item);
+  const state = limits && item.last_close != null ? priceState(item.last_close, limits) : null;
   return (
     <li className="group relative">
       <button
@@ -302,13 +498,29 @@ function InstrumentRow({
       >
         <span className="min-w-0">
           <span className="block text-sm font-semibold">{name}</span>
-          <span className="block truncate text-xs text-muted">
-            {showTurnover ? `GTGD ${formatCompactVnd(item.turnover_vnd)}` : subtitle(item)}
-          </span>
+          {limits ? (
+            <span className="flex gap-1.5 text-xs tabular-nums">
+              <span className="text-ceil" title="Giá trần">
+                {formatPrice(limits.ceiling)}
+              </span>
+              <span className="text-floor" title="Giá sàn">
+                {formatPrice(limits.floor)}
+              </span>
+              <span className="text-flat" title="Giá tham chiếu">
+                {formatPrice(limits.reference)}
+              </span>
+            </span>
+          ) : (
+            <span className="block truncate text-xs text-muted">
+              {showTurnover ? `GTGD ${formatCompactVnd(item.turnover_vnd)}` : subtitle(item)}
+            </span>
+          )}
         </span>
         <span className="flex shrink-0 flex-col items-end gap-1">
-          <span className="text-sm tabular-nums">{formatVnd(item.last_close_vnd)}</span>
-          <ChangeBadge value={item.change_pct} />
+          <span className={`text-sm tabular-nums ${state ? `font-medium ${STATE_TEXT[state]}` : ""}`}>
+            {formatVnd(item.last_close_vnd)}
+          </span>
+          <ChangeBadge value={item.change_pct} state={state} />
         </span>
       </button>
       <button

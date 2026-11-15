@@ -13,6 +13,8 @@ export interface Instrument {
   /** Latest close in the instrument's own quote currency (VND or USDT). */
   last_close: number | null;
   last_close_vnd: number | null;
+  /** Previous session's close (quote currency): the reference price of VN stocks. */
+  prev_close?: number | null;
   /** % change of the latest close vs the previous session. */
   change_pct: number | null;
   /** Latest session's traded quantity; missing from older API versions. */

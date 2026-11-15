@@ -4,10 +4,13 @@ import {
   CandlestickSeries,
   CrosshairMode,
   HistogramSeries,
+  LineStyle,
   createChart,
+  type AutoscaleInfo,
   type CandlestickData,
   type HistogramData,
   type IChartApi,
+  type IPriceLine,
   type ISeriesApi,
   type MouseEventParams,
   type Time,
@@ -15,25 +18,69 @@ import {
 import { useEffect, useEffectEvent, useRef } from "react";
 
 import type { Interval, PriceBar, PriceSeries } from "@/lib/api";
-import { chromeOptions, formatTimeLabel, tickMarkFormatter } from "@/lib/chart";
-import { formatPrice, formatVnd, formatVolume } from "@/lib/format";
-import { currentTheme, useTheme } from "@/lib/theme";
+import { chromeOptions, formatTimeLabel, tickMarkFormatter, timeToIso } from "@/lib/chart";
+import { formatPct, formatPrice, formatVnd, formatVolume } from "@/lib/format";
+import {
+  bandPct,
+  priceLimits,
+  priceState,
+  type PriceLimits,
+  type PriceState,
+  type StockView,
+} from "@/lib/price-limits";
 import { rangeStartIndex, type ChartRange } from "@/lib/range";
+import { currentTheme, useTheme } from "@/lib/theme";
 
 /** Fewer candles than this keep this width (empty space after them) instead of stretching. */
 const MIN_VISIBLE_SLOTS = 10;
 
-// Candle colors are the same in both themes; the chart chrome follows the theme.
+// Up / down candle colors are the same in both themes; the chart chrome follows the theme.
 const COLORS = {
   up: "#22c55e",
   down: "#ef4444",
-  upVolume: "rgba(34, 197, 94, 0.5)",
-  downVolume: "rgba(239, 68, 68, 0.5)",
 } as const;
 
-// Explicit per-bar colors: a candle is "up" when close >= open.
-function toCandle(bar: PriceBar): CandlestickData<Time> {
-  const color = bar.close >= bar.open ? COLORS.up : COLORS.down;
+/** "Thị trường" colors, read from the theme tokens (--color-ceil / --color-floor / --color-flat). */
+function boardColors(): Record<PriceState, string> {
+  const css = getComputedStyle(document.documentElement);
+  const read = (name: string, fallback: string) => css.getPropertyValue(name).trim() || fallback;
+  return {
+    ceil: read("--color-ceil", "#d946ef"),
+    floor: read("--color-floor", "#38bdf8"),
+    ref: read("--color-flat", "#eab308"),
+    up: COLORS.up,
+    down: COLORS.down,
+  };
+}
+
+/** "#rrggbb" -> "rgba(r, g, b, alpha)"; other formats are returned unchanged. */
+function withAlpha(color: string, alpha: number): string {
+  const match = /^#([0-9a-f]{6})$/i.exec(color);
+  if (!match) return color;
+  const n = parseInt(match[1], 16);
+  return `rgba(${n >> 16}, ${(n >> 8) & 255}, ${n & 255}, ${alpha})`;
+}
+
+/** Board state of every bar vs the previous close (its reference price); null for the first bar. */
+interface Mark {
+  limits: PriceLimits;
+  state: PriceState;
+}
+
+function boardMarks(bars: PriceBar[], exchange: string): (Mark | null)[] {
+  return bars.map((bar, index) => {
+    const limits = index > 0 ? priceLimits(bars[index - 1].close, exchange) : null;
+    return limits ? { limits, state: priceState(bar.close, limits) } : null;
+  });
+}
+
+/** Candle color: by close vs open ("Giá trị"), or by close vs reference ("Thị trường"). */
+function barColor(bar: PriceBar, mark: Mark | null | undefined, palette: Record<PriceState, string>) {
+  if (mark) return palette[mark.state];
+  return bar.close >= bar.open ? COLORS.up : COLORS.down;
+}
+
+function toCandle(bar: PriceBar, color: string): CandlestickData<Time> {
   return {
     time: bar.time,
     open: bar.open,
@@ -43,14 +90,6 @@ function toCandle(bar: PriceBar): CandlestickData<Time> {
     color,
     borderColor: color,
     wickColor: color,
-  };
-}
-
-function toVolume(bar: PriceBar): HistogramData<Time> {
-  return {
-    time: bar.time,
-    value: bar.volume,
-    color: bar.close >= bar.open ? COLORS.upVolume : COLORS.downVolume,
   };
 }
 
@@ -64,24 +103,50 @@ function applyRange(chart: IChartApi, bars: PriceBar[], interval: Interval, rang
   chart.timeScale().setVisibleLogicalRange({ from: first - 0.5, to });
 }
 
-function setText(root: HTMLElement, field: string, text: string) {
+function setText(root: HTMLElement, field: string, text: string, color?: string) {
   const element = root.querySelector<HTMLElement>(`[data-field="${field}"]`);
-  if (element) element.textContent = text;
+  if (!element) return;
+  element.textContent = text;
+  if (color !== undefined) element.style.color = color;
+}
+
+function signed(value: number): string {
+  return `${value > 0 ? "+" : value < 0 ? "−" : ""}${formatPrice(Math.abs(value))}`;
+}
+
+interface Shown {
+  key: string;
+  bars: PriceBar[];
+  interval: Interval;
+  /** Index of each bar by date, for the tooltip. */
+  index: Map<string, number>;
+  /** Present in the "Thị trường" view. */
+  marks: (Mark | null)[] | null;
+  palette: Record<PriceState, string>;
 }
 
 interface PriceChartProps {
   /** Data to draw. `undefined` while loading: the previous candles stay on screen. */
   series: PriceSeries | undefined;
   range: ChartRange;
+  /**
+   * "market": VN price board colors. Each candle is colored against its reference price
+   * (previous close): purple at the ceiling, light blue at the floor, yellow when unchanged.
+   * The latest session's ceiling / floor / reference are drawn as lines. Daily VN stocks only.
+   */
+  view?: StockView;
 }
 
-export default function PriceChart({ series, range }: PriceChartProps) {
+export default function PriceChart({ series, range, view = "value" }: PriceChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const tooltipRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const candlesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
   const volumeRef = useRef<ISeriesApi<"Histogram"> | null>(null);
-  const shownRef = useRef<{ key: string; bars: PriceBar[]; interval: Interval } | null>(null);
+  const limitLinesRef = useRef<IPriceLine[]>([]);
+  /** Latest session's limits: kept inside the price scale so the three lines stay visible. */
+  const latestLimitsRef = useRef<PriceLimits | null>(null);
+  const shownRef = useRef<Shown | null>(null);
   const theme = useTheme();
 
   const applyRangeToShown = useEffectEvent(() => {
@@ -95,7 +160,8 @@ export default function PriceChart({ series, range }: PriceChartProps) {
     const container = containerRef.current;
     const candles = candlesRef.current;
     const volume = volumeRef.current;
-    if (!tooltip || !container || !candles || !volume) return;
+    const shown = shownRef.current;
+    if (!tooltip || !container || !candles || !volume || !shown) return;
 
     const candle = param.seriesData.get(candles) as CandlestickData<Time> | undefined;
     const point = param.point;
@@ -104,7 +170,10 @@ export default function PriceChart({ series, range }: PriceChartProps) {
       return;
     }
     const traded = param.seriesData.get(volume) as HistogramData<Time> | undefined;
-    const interval = shownRef.current?.interval ?? "1d";
+    const interval = shown.interval;
+    const barIndex = shown.index.get(timeToIso(candle.time));
+    const bar = barIndex === undefined ? undefined : shown.bars[barIndex];
+    const mark = barIndex === undefined ? null : (shown.marks?.[barIndex] ?? null);
 
     setText(
       tooltip,
@@ -114,10 +183,34 @@ export default function PriceChart({ series, range }: PriceChartProps) {
     setText(tooltip, "open", formatVnd(candle.open));
     setText(tooltip, "high", formatVnd(candle.high));
     setText(tooltip, "low", formatVnd(candle.low));
-    setText(tooltip, "close", formatVnd(candle.close));
+    setText(
+      tooltip,
+      "close",
+      formatVnd(candle.close),
+      bar ? barColor(bar, mark, shown.palette) : undefined,
+    );
     setText(tooltip, "volume", traded ? formatVolume(traded.value) : "—");
-    const close = tooltip.querySelector<HTMLElement>('[data-field="close"]');
-    if (close) close.style.color = candle.close >= candle.open ? COLORS.up : COLORS.down;
+
+    tooltip.querySelectorAll<HTMLElement>("[data-board]").forEach((rows) => {
+      rows.style.display = shown.marks ? "contents" : "none";
+    });
+    if (shown.marks) {
+      const { palette } = shown;
+      if (mark) {
+        const diff = candle.close - mark.limits.reference;
+        setText(tooltip, "ref", formatVnd(mark.limits.reference));
+        setText(tooltip, "ceil", formatVnd(mark.limits.ceiling));
+        setText(tooltip, "floor", formatVnd(mark.limits.floor));
+        setText(
+          tooltip,
+          "change",
+          `${signed(diff)} (${formatPct((diff / mark.limits.reference) * 100)})`,
+          palette[mark.state],
+        );
+      } else {
+        for (const field of ["ref", "ceil", "floor", "change"]) setText(tooltip, field, "—");
+      }
+    }
 
     // Follow the cursor, flipping sides near the right/bottom edges.
     tooltip.style.display = "block";
@@ -169,6 +262,18 @@ export default function PriceChart({ series, range }: PriceChartProps) {
         tickmarksFormatter: (prices: number[]) =>
           prices.map((price) => (price < 0 ? "" : formatPrice(price))),
       },
+      autoscaleInfoProvider: (original: () => AutoscaleInfo | null) => {
+        const info = original();
+        const limits = latestLimitsRef.current;
+        if (!info?.priceRange || !limits) return info;
+        return {
+          ...info,
+          priceRange: {
+            minValue: Math.min(info.priceRange.minValue, limits.floor),
+            maxValue: Math.max(info.priceRange.maxValue, limits.ceiling),
+          },
+        };
+      },
     });
 
     // Volume on its own invisible scale, squeezed into the bottom 20% of the chart.
@@ -194,10 +299,13 @@ export default function PriceChart({ series, range }: PriceChartProps) {
       candlesRef.current = null;
       volumeRef.current = null;
       shownRef.current = null;
+      limitLinesRef.current = [];
+      latestLimitsRef.current = null;
     };
   }, []);
 
-  // New data. Same symbol + interval (e.g. another USDT rate): keep the user's zoom/pan.
+  // New data, other view or theme. Same symbol + interval (e.g. another USDT rate, "Giá trị" ->
+  // "Thị trường"): keep the user's zoom/pan.
   useEffect(() => {
     const chart = chartRef.current;
     const candles = candlesRef.current;
@@ -208,16 +316,58 @@ export default function PriceChart({ series, range }: PriceChartProps) {
     const keepView =
       shownRef.current?.key === key ? chart.timeScale().getVisibleLogicalRange() : null;
 
-    candles.setData(series.bars.map(toCandle));
-    volume.setData(series.bars.map(toVolume));
+    const board =
+      view === "market" && series.interval === "1d" && bandPct(series.exchange) !== null;
+    const marks = board ? boardMarks(series.bars, series.exchange) : null;
+    const palette = boardColors();
+
+    candles.setData(
+      series.bars.map((bar, i) => toCandle(bar, barColor(bar, marks?.[i], palette))),
+    );
+    volume.setData(
+      series.bars.map((bar, i) => ({
+        time: bar.time,
+        value: bar.volume,
+        color: withAlpha(barColor(bar, marks?.[i], palette), 0.5),
+      })),
+    );
+
+    // Ceiling / floor / reference of the latest session.
+    for (const line of limitLinesRef.current) candles.removePriceLine(line);
+    const latest = marks?.[marks.length - 1]?.limits ?? null;
+    latestLimitsRef.current = latest;
+    limitLinesRef.current = latest
+      ? [
+          { price: latest.ceiling, color: palette.ceil, title: "Trần" },
+          { price: latest.floor, color: palette.floor, title: "Sàn" },
+          { price: latest.reference, color: palette.ref, title: "TC" },
+        ].map((line) =>
+          candles.createPriceLine({
+            ...line,
+            lineWidth: 1,
+            lineStyle: LineStyle.Dashed,
+            axisLabelVisible: true,
+          }),
+        )
+      : [];
+    // Up / down price line of the last candle would sit on top of the TC / Trần / Sàn labels.
+    candles.applyOptions({ priceLineVisible: !latest });
+
     chart.applyOptions({
       localization: { timeFormatter: (time: Time) => formatTimeLabel(time, series.interval) },
     });
-    shownRef.current = { key, bars: series.bars, interval: series.interval };
+    shownRef.current = {
+      key,
+      bars: series.bars,
+      interval: series.interval,
+      index: new Map(series.bars.map((bar, i) => [bar.time, i])),
+      marks,
+      palette,
+    };
 
     if (keepView) chart.timeScale().setVisibleLogicalRange(keepView);
     else applyRangeToShown();
-  }, [series]);
+  }, [series, view, theme]);
 
   // Theme switch flipped.
   useEffect(() => {
@@ -238,6 +388,14 @@ export default function PriceChart({ series, range }: PriceChartProps) {
       >
         <div data-field="date" className="mb-1.5 font-semibold text-ink" />
         <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-0.5 tabular-nums">
+          <div data-board className="hidden">
+            <dt className="text-muted">Tham chiếu</dt>
+            <dd data-field="ref" className="text-right text-flat" />
+            <dt className="text-muted">Trần</dt>
+            <dd data-field="ceil" className="text-right text-ceil" />
+            <dt className="text-muted">Sàn</dt>
+            <dd data-field="floor" className="text-right text-floor" />
+          </div>
           <dt className="text-muted">Mở</dt>
           <dd data-field="open" className="text-right" />
           <dt className="text-muted">Cao</dt>
@@ -246,6 +404,10 @@ export default function PriceChart({ series, range }: PriceChartProps) {
           <dd data-field="low" className="text-right" />
           <dt className="text-muted">Đóng</dt>
           <dd data-field="close" className="text-right font-semibold" />
+          <div data-board className="hidden">
+            <dt className="text-muted">Thay đổi</dt>
+            <dd data-field="change" className="text-right" />
+          </div>
           <dt className="text-muted">Khối lượng</dt>
           <dd data-field="volume" className="text-right" />
         </dl>
