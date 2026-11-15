@@ -16,6 +16,9 @@
   --color-up: #22c55e;
   --color-down: #ef4444;
   --color-flat: #eab308;
+  /* Vietnamese price board: ceiling (trần) purple, floor (sàn) light blue, reference yellow (= flat). */
+  --color-ceil: #d946ef;
+  --color-floor: #38bdf8;
 }
 
 @theme inline {
@@ -47,6 +50,8 @@
   --color-up: #15803d;
   --color-down: #c62828;
   --color-flat: #a16207;
+  --color-ceil: #a21caf;
+  --color-floor: #0284c7;
   --series-0: #2b5fd9;
   --series-1: #c2410c;
   --series-2: #7c3aed;

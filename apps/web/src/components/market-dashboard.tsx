@@ -19,6 +19,7 @@ import {
 import { nextFreeSlot, type CompareSlot } from "@/lib/compare";
 import { DEFAULT_USD_VND_RATE, parseRate } from "@/lib/format";
 import { baseSymbol } from "@/lib/instrument";
+import type { StockView } from "@/lib/price-limits";
 import { DEFAULT_RANGE, yearsSpanned, type ChartRange } from "@/lib/range";
 
 /** Price series kept in memory, so flipping between symbols / intervals is instant. */
@@ -57,6 +58,7 @@ export default function MarketDashboard() {
   const [tab, setTab] = useState<AssetClass>("stock");
   const [selectedSymbol, setSelectedSymbol] = useState<string | null>(null);
   const [compare, setCompare] = useState<CompareSlot[]>([]);
+  const [stockView, setStockView] = useState<StockView>("value");
   const [chartInterval, setChartInterval] = useState<Interval>("1d");
   const [range, setRange] = useState<ChartRange>(DEFAULT_RANGE);
   const [reloadToken, setReloadToken] = useState(0);
@@ -101,15 +103,19 @@ export default function MarketDashboard() {
     null;
   const symbol = selected?.symbol ?? null;
 
+  // "Cổ phiếu VN → Thị trường" applies to VN stocks; it has daily candles only and no comparison.
+  const marketView = stockView === "market" && selected?.asset_class === "stock";
+  const interval: Interval = marketView ? "1d" : chartInterval;
+
   // Instruments drawn next to the main one (never the main one itself).
-  const compared = compare.flatMap((slot) => {
+  const compared = (marketView ? [] : compare).flatMap((slot) => {
     const item = instruments?.find((inst) => inst.symbol === slot.symbol);
     return item && item.symbol !== symbol ? [{ ...slot, item }] : [];
   });
 
   // VND-quoted series do not depend on the USDT rate, so they are not refetched when it changes.
   const keyOf = (item: Instrument) =>
-    [item.symbol, chartInterval, item.quote_currency === "VND" ? "VND" : rate].join("|");
+    [item.symbol, interval, item.quote_currency === "VND" ? "VND" : rate].join("|");
   const wanted = [...(selected ? [selected] : []), ...compared.map((c) => c.item)].map((item) => ({
     item,
     key: keyOf(item),
@@ -126,7 +132,7 @@ export default function MarketDashboard() {
       if (inflight.current.has(key)) continue;
       const controller = new AbortController();
       inflight.current.set(key, controller);
-      fetchPrices(item.symbol, chartInterval, rate, controller.signal)
+      fetchPrices(item.symbol, interval, rate, controller.signal)
         .then((series) => setSeriesState((previous) => addToCache(previous, key, series)))
         .catch((error: unknown) => {
           if (controller.signal.aborted) return;
@@ -172,6 +178,20 @@ export default function MarketDashboard() {
   const changeInterval = (next: Interval) => {
     setChartInterval(next);
     if (next === "1m" && range.unit === "day") setRange({ unit: "month", count: 1 });
+  };
+
+  // Hover menu of the "Cổ phiếu VN" tab; clicking the tab itself picks "Giá trị".
+  const chooseStockView = (view: StockView) => {
+    setTab("stock");
+    setStockView(view);
+    if (view === "market") {
+      setChartInterval("1d"); // also the interval kept when going back to "Giá trị"
+      // The board needs a VN stock: leave a crypto selection for the first stock.
+      if (selected?.asset_class !== "stock") {
+        const firstStock = instruments?.find((item) => item.asset_class === "stock");
+        if (firstStock) setSelectedSymbol(firstStock.symbol);
+      }
+    }
   };
 
   // "Năm" wheel length: years covered by the data on screen (the previous series while loading).
@@ -222,6 +242,8 @@ export default function MarketDashboard() {
         error={instrumentsError}
         tab={tab}
         onTabChange={setTab}
+        stockView={stockView}
+        onStockViewChange={chooseStockView}
         selected={symbol}
         onSelect={selectSymbol}
         onRetry={retry}
@@ -233,7 +255,7 @@ export default function MarketDashboard() {
           rateInput={rateInput}
           rateValid={parseRate(rateInput) !== null}
           onRateInput={setRateInput}
-          interval={chartInterval}
+          interval={interval}
           onIntervalChange={changeInterval}
           range={range}
           onRangeChange={setRange}
@@ -243,18 +265,23 @@ export default function MarketDashboard() {
           onCompareAdd={addCompare}
           onCompareRemove={removeCompare}
           onCompareClear={() => setCompare([])}
+          marketView={marketView}
         />
         <section aria-label="Biểu đồ giá" className="relative min-h-[420px] flex-1 md:min-h-0">
           {comparing ? (
             <CompareChart
               entries={compareEntries}
-              interval={chartInterval}
+              interval={interval}
               range={range}
               onRemove={removeCompare}
               onRetry={retry}
             />
           ) : (
-            <PriceChart series={currentSeries} range={range} />
+            <PriceChart
+              series={currentSeries}
+              range={range}
+              view={marketView ? "market" : "value"}
+            />
           )}
           {overlay}
         </section>

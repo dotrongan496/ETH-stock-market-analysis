@@ -126,6 +126,7 @@ def test_instruments_default_rate(client: TestClient) -> None:
     assert fpt["last_trade_date"] == "2026-11-03"
     assert fpt["last_close"] == 85900
     assert fpt["last_close_vnd"] == 85900  # VND is not converted
+    assert fpt["prev_close"] == 86000  # reference price of the latest session
     assert fpt["change_pct"] == pytest.approx((85900 - 86000) / 86000 * 100, abs=1e-4)
 
     btc = items["BTCUSDT"]
@@ -155,6 +156,7 @@ def test_instruments_without_bars_have_null_prices(client: TestClient) -> None:
     assert new["last_close_vnd"] is None
     assert new["change_pct"] is None
     assert new["last_volume"] is None
+    assert new["prev_close"] is None
     assert new["turnover_vnd"] is None
 
 

@@ -8,8 +8,9 @@ import NumberWheel, { type WheelOption } from "@/components/number-wheel";
 import SegmentedControl, { type SegmentOption } from "@/components/segmented-control";
 import type { Instrument, Interval } from "@/lib/api";
 import type { CompareSlot } from "@/lib/compare";
-import { formatDay, formatNumber, formatVnd, quoteDecimals } from "@/lib/format";
+import { formatDay, formatNumber, formatPrice, formatVnd, quoteDecimals } from "@/lib/format";
 import { displayName, exchangeLabel } from "@/lib/instrument";
+import { STATE_TEXT, bandPct, instrumentLimits, priceState } from "@/lib/price-limits";
 import {
   UNIT_MAX,
   describeRange,
@@ -19,10 +20,20 @@ import {
   type RangeUnit,
 } from "@/lib/range";
 
-const INTERVAL_OPTIONS: ReadonlyArray<SegmentOption<Interval>> = [
-  { value: "1m", label: "Theo Tháng (1M)", title: "Mỗi nến là một tháng" },
-  { value: "1d", label: "Theo Ngày (1D)", title: "Mỗi nến là một phiên giao dịch" },
-];
+/** Ceiling / floor are per session, so "Thị trường" only has daily candles. */
+function intervalOptions(marketView: boolean): ReadonlyArray<SegmentOption<Interval>> {
+  return [
+    {
+      value: "1m",
+      label: "Theo Tháng (1M)",
+      title: marketView
+        ? "Chế độ Thị trường chỉ xem theo ngày (trần / sàn tính theo từng phiên)"
+        : "Mỗi nến là một tháng",
+      disabled: marketView,
+    },
+    { value: "1d", label: "Theo Ngày (1D)", title: "Mỗi nến là một phiên giao dịch" },
+  ];
+}
 
 const UNIT_WORD: Record<RangeUnit, string> = { day: "ngày", month: "tháng", year: "năm" };
 
@@ -72,6 +83,8 @@ interface ChartHeaderProps {
   onCompareAdd: (symbol: string) => void;
   onCompareRemove: (symbol: string) => void;
   onCompareClear: () => void;
+  /** "Cổ phiếu VN → Thị trường": board colors and price limits, daily candles only. */
+  marketView: boolean;
 }
 
 export default function ChartHeader({
@@ -90,12 +103,18 @@ export default function ChartHeader({
   onCompareAdd,
   onCompareRemove,
   onCompareClear,
+  marketView,
 }: ChartHeaderProps) {
   return (
     <header className="flex flex-wrap items-end justify-between gap-x-6 gap-y-4 border-b border-line px-4 py-4 sm:px-5">
       <div className="min-w-0">
-        <InstrumentSummary instrument={instrument} appliedRate={appliedRate} />
-        {instrument && (
+        <InstrumentSummary
+          instrument={instrument}
+          appliedRate={appliedRate}
+          marketView={marketView}
+        />
+        {instrument && marketView && <LimitsRow instrument={instrument} />}
+        {instrument && !marketView && (
           <ComparePicker
             instruments={instruments}
             main={instrument}
@@ -112,7 +131,7 @@ export default function ChartHeader({
           <SegmentedControl
             label="Khung nến"
             value={interval}
-            options={INTERVAL_OPTIONS}
+            options={intervalOptions(marketView)}
             onChange={onIntervalChange}
           />
         </Field>
@@ -174,12 +193,52 @@ function RangePicker({
   );
 }
 
+/** "Thị trường": the latest session's ceiling / floor / reference, colored like a price board. */
+function LimitsRow({ instrument }: { instrument: Instrument }) {
+  const limits = instrumentLimits(instrument);
+  const band = bandPct(instrument.exchange);
+  if (!limits) return null;
+  const cells = [
+    { label: "Trần", value: limits.ceiling, tone: "bg-ceil/15 text-ceil", dot: "bg-ceil" },
+    { label: "Sàn", value: limits.floor, tone: "bg-floor/15 text-floor", dot: "bg-floor" },
+    { label: "Tham chiếu", value: limits.reference, tone: "bg-flat/15 text-flat", dot: "bg-flat" },
+  ];
+  return (
+    <div className="mt-2.5 flex flex-wrap items-center gap-1.5 text-xs">
+      {cells.map((cell) => (
+        <span
+          key={cell.label}
+          className={`inline-flex h-6 items-center gap-1.5 rounded-full px-2.5 tabular-nums ${cell.tone}`}
+        >
+          <span aria-hidden className={`size-2 rounded-full ${cell.dot}`} />
+          {cell.label}
+          <span className="font-semibold">{formatPrice(cell.value)}</span>
+        </span>
+      ))}
+      {band !== null && (
+        <span
+          className="text-muted"
+          title={
+            instrument.exchange === "UPCOM"
+              ? "UPCoM tính tham chiếu bằng giá bình quân phiên trước; ở đây dùng giá đóng cửa phiên trước."
+              : "Tham chiếu = giá đóng cửa phiên trước"
+          }
+        >
+          Biên độ ±{band}% ({exchangeLabel(instrument.exchange)})
+        </span>
+      )}
+    </div>
+  );
+}
+
 function InstrumentSummary({
   instrument,
   appliedRate,
+  marketView,
 }: {
   instrument: Instrument | null;
   appliedRate: number;
+  marketView: boolean;
 }) {
   if (!instrument) {
     return (
@@ -192,6 +251,9 @@ function InstrumentSummary({
   }
 
   const isCrypto = instrument.asset_class === "crypto";
+  const limits = marketView ? instrumentLimits(instrument) : null;
+  const state =
+    limits && instrument.last_close != null ? priceState(instrument.last_close, limits) : null;
   return (
     <div className="min-w-0">
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
@@ -204,10 +266,14 @@ function InstrumentSummary({
         )}
       </div>
       <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
-        <span className="text-2xl font-semibold tracking-tight tabular-nums sm:text-[28px]">
+        <span
+          className={`text-2xl font-semibold tracking-tight tabular-nums sm:text-[28px] ${
+            state ? STATE_TEXT[state] : ""
+          }`}
+        >
           {formatVnd(instrument.last_close_vnd)}
         </span>
-        <ChangeBadge value={instrument.change_pct} size="md" />
+        <ChangeBadge value={instrument.change_pct} size="md" state={state} />
       </div>
       <p className="mt-1 text-xs text-muted tabular-nums">
         {instrument.last_trade_date

@@ -25,6 +25,10 @@ class InstrumentOut(BaseModel):
     last_trade_date: dt.date | None = Field(description="Latest session with data")
     last_close: float | None = Field(description="Latest close in the quote currency")
     last_close_vnd: float | None = Field(description="Latest close converted to VND")
+    prev_close: float | None = Field(
+        default=None,
+        description="Previous session's close in the quote currency (VN stocks: reference price)",
+    )
     change_pct: float | None = Field(description="% change of the close vs the previous session")
     last_volume: float | None = Field(
         default=None, description="Traded quantity in the latest session (shares or coins)"
