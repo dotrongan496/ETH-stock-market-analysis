@@ -3,6 +3,7 @@
 import { useEffect, useEffectEvent, useRef, useState, type ReactNode } from "react";
 
 import ChartHeader from "@/components/chart-header";
+import { ChartSkeleton, LoadingBar, StaleVeil } from "@/components/chart-loading";
 import CompareChart, { type CompareEntry } from "@/components/compare-chart";
 import InstrumentSidebar from "@/components/instrument-sidebar";
 import PriceChart from "@/components/price-chart";
@@ -25,6 +26,7 @@ import { DEFAULT_RANGE, yearsSpanned, type ChartRange } from "@/lib/range";
 /** Price series kept in memory, so flipping between symbols / intervals is instant. */
 const MAX_CACHED_SERIES = 30;
 const RATE_DEBOUNCE_MS = 450;
+const PREFETCH_DELAY_MS = 90;
 
 interface InstrumentsState {
   requestKey: string;
@@ -124,35 +126,62 @@ export default function MarketDashboard() {
     ({ key }) => !(key in seriesState.cache) && !(key in seriesState.errors),
   );
 
-  // Fetch every missing series. Requests are not aborted when another one lands (that would
-  // restart the rest); they are only aborted when the dashboard unmounts.
+  // Requests are not aborted when another one lands (that would restart the rest); they are
+  // only aborted when the dashboard unmounts.
   const inflight = useRef(new Map<string, AbortController>());
+  const [retryTick, setRetryTick] = useState(0);
+  const loadSeries = (item: Instrument, key: string, prefetch = false) => {
+    if (inflight.current.has(key)) return;
+    const controller = new AbortController();
+    inflight.current.set(key, controller);
+    const settle = () => {
+      if (inflight.current.get(key) === controller) inflight.current.delete(key);
+    };
+    fetchPrices(item.symbol, interval, rate, controller.signal)
+      .then((series) => {
+        settle();
+        setSeriesState((previous) => addToCache(previous, key, series));
+      })
+      .catch((error: unknown) => {
+        settle();
+        if (controller.signal.aborted) return;
+        // A failed prefetch shows nothing; if the series is on screen by now, fetch it for real.
+        if (prefetch) {
+          setRetryTick((tick) => tick + 1);
+          return;
+        }
+        setSeriesState((previous) => ({
+          ...previous,
+          errors: { ...previous.errors, [key]: errorMessage(error) },
+        }));
+      });
+  };
+
+  // Fetch every missing series that is on screen.
   const startFetches = useEffectEvent(() => {
-    for (const { item, key } of missing) {
-      if (inflight.current.has(key)) continue;
-      const controller = new AbortController();
-      inflight.current.set(key, controller);
-      fetchPrices(item.symbol, interval, rate, controller.signal)
-        .then((series) => setSeriesState((previous) => addToCache(previous, key, series)))
-        .catch((error: unknown) => {
-          if (controller.signal.aborted) return;
-          setSeriesState((previous) => ({
-            ...previous,
-            errors: { ...previous.errors, [key]: errorMessage(error) },
-          }));
-        })
-        .finally(() => {
-          if (inflight.current.get(key) === controller) inflight.current.delete(key);
-        });
-    }
+    for (const { item, key } of missing) loadSeries(item, key);
   });
   const missingKey = missing.map(({ key }) => key).join(",");
   useEffect(() => {
     startFetches();
-  }, [missingKey, reloadToken]);
+  }, [missingKey, reloadToken, retryTick]);
+
+  // Prefetch: resting on a watchlist row (mouse or keyboard) loads its chart, so the click
+  // shows it at once. The short delay skips rows the pointer only passes over.
+  const prefetchTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const prefetch = (target: string | null) => {
+    clearTimeout(prefetchTimer.current);
+    const item = target === null ? null : instruments?.find((inst) => inst.symbol === target);
+    if (!item) return;
+    const key = keyOf(item);
+    if (key in seriesState.cache || key in seriesState.errors) return;
+    prefetchTimer.current = setTimeout(() => loadSeries(item, key, true), PREFETCH_DELAY_MS);
+  };
+
   useEffect(() => {
     const requests = inflight.current;
     return () => {
+      clearTimeout(prefetchTimer.current);
       requests.forEach((controller) => controller.abort());
       requests.clear();
     };
@@ -225,15 +254,19 @@ export default function MarketDashboard() {
 
   const chartHasData = seriesState.order.length > 0;
   let overlay: ReactNode = null;
+  let loading = false;
   if (instruments === null && instrumentsError) {
     overlay = <ApiUnavailable message={instrumentsError} onRetry={retry} />;
   } else if (seriesError) {
     overlay = <ChartMessage title="Không tải được biểu đồ" detail={seriesError} onRetry={retry} />;
   } else if (!currentSeries) {
-    overlay = <LoadingIndicator compact={chartHasData} />;
+    // Previous candles stay visible underneath while new data loads.
+    overlay = chartHasData ? <StaleVeil /> : <ChartSkeleton />;
+    loading = true;
   } else if (currentSeries.bars.length === 0 && !comparing) {
     overlay = <ChartMessage title="Chưa có dữ liệu giá cho mã này" />;
   }
+  if (comparing && compareEntries.some((entry) => !entry.series && !entry.error)) loading = true;
 
   return (
     <div className="flex min-h-dvh flex-col md:h-dvh md:flex-row">
@@ -246,6 +279,7 @@ export default function MarketDashboard() {
         onStockViewChange={chooseStockView}
         selected={symbol}
         onSelect={selectSymbol}
+        onPrefetch={prefetch}
         onRetry={retry}
       />
       <main className="flex min-w-0 flex-1 flex-col md:min-h-0">
@@ -284,27 +318,9 @@ export default function MarketDashboard() {
             />
           )}
           {overlay}
+          {loading && <LoadingBar />}
         </section>
       </main>
-    </div>
-  );
-}
-
-function LoadingIndicator({ compact }: { compact: boolean }) {
-  const pill = (
-    <span className="inline-flex items-center gap-2 rounded-full border border-line bg-raised/90 px-3 py-1.5 text-xs text-muted shadow-lg shadow-black/30">
-      <span className="size-3 animate-spin rounded-full border-2 border-muted/30 border-t-accent" />
-      Đang tải dữ liệu…
-    </span>
-  );
-  // Previous candles stay visible underneath while new data loads.
-  return compact ? (
-    <div role="status" className="pointer-events-none absolute inset-x-0 top-3 z-20 flex justify-center">
-      {pill}
-    </div>
-  ) : (
-    <div role="status" className="absolute inset-0 z-20 flex items-center justify-center bg-canvas">
-      {pill}
     </div>
   );
 }

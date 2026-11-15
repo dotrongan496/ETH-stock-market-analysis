@@ -84,6 +84,60 @@ body {
 }
 
 /*
+ * Chart loading (components/chart-loading.tsx). Everything fades in after a short delay,
+ * so loads that finish quickly (cache, prefetch) never flash a loader.
+ */
+.loading-bar {
+  animation: loading-appear 200ms ease-out 250ms both;
+}
+
+.loading-bar::before {
+  content: "";
+  position: absolute;
+  inset-block: 0;
+  left: 0;
+  width: 40%;
+  border-radius: 9999px;
+  background: linear-gradient(90deg, transparent, var(--color-accent) 40%, var(--color-accent) 60%, transparent);
+  /* -100% → 250% of its own 40% width = from just off the left edge to just off the right. */
+  animation: loading-slide 1.1s cubic-bezier(0.45, 0, 0.25, 1) infinite;
+}
+
+.loading-veil {
+  animation: loading-appear 300ms ease-out 600ms both;
+}
+
+.loading-skeleton {
+  animation: loading-appear 200ms ease-out 120ms both;
+}
+
+@keyframes loading-appear {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes loading-slide {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(250%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .loading-bar::before {
+    width: 100%;
+    opacity: 0.6;
+    animation: none;
+  }
+}
+
+/*
  * Theme switch: a wall rocker switch (components/theme-switch.tsx).
  * Dark theme = "O" side pressed, lamp off. Light theme = "I" side pressed, lamp glowing,
  * like the indicator on a water-heater switch.
