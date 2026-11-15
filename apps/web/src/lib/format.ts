@@ -62,6 +62,23 @@ export function changeDirection(value: number | null | undefined): "up" | "down"
   return shown > 0 ? "up" : shown < 0 ? "down" : "flat";
 }
 
+const compact = new Intl.NumberFormat(LOCALE, { maximumFractionDigits: 1 });
+const SCALES: ReadonlyArray<[number, string]> = [
+  [1e12, "nghìn tỷ"],
+  [1e9, "tỷ"],
+  [1e6, "triệu"],
+];
+
+/** Large VND amount in words, e.g. "12,3 tỷ ₫", "850 triệu ₫". */
+export function formatCompactVnd(value: number | null | undefined): string {
+  if (value == null || !Number.isFinite(value)) return "—";
+  const abs = Math.abs(value);
+  for (const [scale, word] of SCALES) {
+    if (abs >= scale) return `${compact.format(value / scale)} ${word} ₫`;
+  }
+  return formatVnd(value);
+}
+
 /** Traded quantity: shares for stocks, coins for crypto. */
 export function formatVolume(value: number): string {
   const abs = Math.abs(value);

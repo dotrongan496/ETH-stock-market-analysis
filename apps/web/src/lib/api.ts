@@ -15,6 +15,10 @@ export interface Instrument {
   last_close_vnd: number | null;
   /** % change of the latest close vs the previous session. */
   change_pct: number | null;
+  /** Latest session's traded quantity; missing from older API versions. */
+  last_volume?: number | null;
+  /** Latest session's traded value in VND (close × volume). */
+  turnover_vnd?: number | null;
 }
 
 export interface PriceBar {

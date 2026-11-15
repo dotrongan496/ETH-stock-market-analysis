@@ -59,6 +59,11 @@ def list_instruments(
             else None
         )
         change = pct_change(quote.last_close, quote.prev_close)
+        turnover = (
+            last_close_vnd * quote.last_volume
+            if last_close_vnd is not None and quote.last_volume is not None
+            else None
+        )
         items.append(
             InstrumentOut(
                 symbol=inst.symbol,
@@ -70,6 +75,8 @@ def list_instruments(
                 last_close=float(quote.last_close) if quote.last_close is not None else None,
                 last_close_vnd=float(last_close_vnd) if last_close_vnd is not None else None,
                 change_pct=round(float(change), 4) if change is not None else None,
+                last_volume=float(quote.last_volume) if quote.last_volume is not None else None,
+                turnover_vnd=float(turnover) if turnover is not None else None,
             )
         )
     return items

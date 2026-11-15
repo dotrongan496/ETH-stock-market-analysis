@@ -26,6 +26,12 @@ class InstrumentOut(BaseModel):
     last_close: float | None = Field(description="Latest close in the quote currency")
     last_close_vnd: float | None = Field(description="Latest close converted to VND")
     change_pct: float | None = Field(description="% change of the close vs the previous session")
+    last_volume: float | None = Field(
+        default=None, description="Traded quantity in the latest session (shares or coins)"
+    )
+    turnover_vnd: float | None = Field(
+        default=None, description="Traded value of the latest session in VND (close x volume)"
+    )
 
 
 class PriceBarOut(BaseModel):

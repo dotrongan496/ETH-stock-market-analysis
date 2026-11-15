@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useEffectEvent, useRef, useState, type ReactNode } from "react";
 
 import ChartHeader from "@/components/chart-header";
+import CompareChart, { type CompareEntry } from "@/components/compare-chart";
 import InstrumentSidebar from "@/components/instrument-sidebar";
 import PriceChart from "@/components/price-chart";
 import {
@@ -15,7 +16,9 @@ import {
   type Interval,
   type PriceSeries,
 } from "@/lib/api";
+import { nextFreeSlot, type CompareSlot } from "@/lib/compare";
 import { DEFAULT_USD_VND_RATE, parseRate } from "@/lib/format";
+import { baseSymbol } from "@/lib/instrument";
 import { DEFAULT_RANGE, yearsSpanned, type ChartRange } from "@/lib/range";
 
 /** Price series kept in memory, so flipping between symbols / intervals is instant. */
@@ -32,7 +35,8 @@ interface InstrumentsState {
 interface SeriesState {
   cache: Record<string, PriceSeries>;
   order: string[]; // oldest first, for eviction
-  error: { key: string; message: string } | null;
+  /** Failed requests by series key; cleared by "Thử lại". */
+  errors: Record<string, string>;
 }
 
 function addToCache(state: SeriesState, key: string, series: PriceSeries): SeriesState {
@@ -42,7 +46,9 @@ function addToCache(state: SeriesState, key: string, series: PriceSeries): Serie
     const evicted = order.shift();
     if (evicted !== undefined) delete cache[evicted];
   }
-  return { cache, order, error: state.error?.key === key ? null : state.error };
+  const errors = { ...state.errors };
+  delete errors[key];
+  return { cache, order, errors };
 }
 
 export default function MarketDashboard() {
@@ -50,11 +56,12 @@ export default function MarketDashboard() {
   const [rate, setRate] = useState(DEFAULT_USD_VND_RATE);
   const [tab, setTab] = useState<AssetClass>("stock");
   const [selectedSymbol, setSelectedSymbol] = useState<string | null>(null);
+  const [compare, setCompare] = useState<CompareSlot[]>([]);
   const [chartInterval, setChartInterval] = useState<Interval>("1d");
   const [range, setRange] = useState<ChartRange>(DEFAULT_RANGE);
   const [reloadToken, setReloadToken] = useState(0);
   const [instrumentsState, setInstrumentsState] = useState<InstrumentsState | null>(null);
-  const [seriesState, setSeriesState] = useState<SeriesState>({ cache: {}, order: [], error: null });
+  const [seriesState, setSeriesState] = useState<SeriesState>({ cache: {}, order: [], errors: {} });
 
   // Apply a typed rate once the user pauses typing.
   useEffect(() => {
@@ -94,28 +101,72 @@ export default function MarketDashboard() {
     null;
   const symbol = selected?.symbol ?? null;
 
-  // VND-quoted series do not depend on the USDT rate, so they are not refetched when it changes.
-  const seriesKey = selected
-    ? [selected.symbol, chartInterval, selected.quote_currency === "VND" ? "VND" : rate].join("|")
-    : null;
-  const currentSeries = seriesKey ? seriesState.cache[seriesKey] : undefined;
-  const hasSeries = currentSeries !== undefined;
-  const seriesError = seriesState.error?.key === seriesKey ? seriesState.error.message : null;
+  // Instruments drawn next to the main one (never the main one itself).
+  const compared = compare.flatMap((slot) => {
+    const item = instruments?.find((inst) => inst.symbol === slot.symbol);
+    return item && item.symbol !== symbol ? [{ ...slot, item }] : [];
+  });
 
+  // VND-quoted series do not depend on the USDT rate, so they are not refetched when it changes.
+  const keyOf = (item: Instrument) =>
+    [item.symbol, chartInterval, item.quote_currency === "VND" ? "VND" : rate].join("|");
+  const wanted = [...(selected ? [selected] : []), ...compared.map((c) => c.item)].map((item) => ({
+    item,
+    key: keyOf(item),
+  }));
+  const missing = wanted.filter(
+    ({ key }) => !(key in seriesState.cache) && !(key in seriesState.errors),
+  );
+
+  // Fetch every missing series. Requests are not aborted when another one lands (that would
+  // restart the rest); they are only aborted when the dashboard unmounts.
+  const inflight = useRef(new Map<string, AbortController>());
+  const startFetches = useEffectEvent(() => {
+    for (const { item, key } of missing) {
+      if (inflight.current.has(key)) continue;
+      const controller = new AbortController();
+      inflight.current.set(key, controller);
+      fetchPrices(item.symbol, chartInterval, rate, controller.signal)
+        .then((series) => setSeriesState((previous) => addToCache(previous, key, series)))
+        .catch((error: unknown) => {
+          if (controller.signal.aborted) return;
+          setSeriesState((previous) => ({
+            ...previous,
+            errors: { ...previous.errors, [key]: errorMessage(error) },
+          }));
+        })
+        .finally(() => {
+          if (inflight.current.get(key) === controller) inflight.current.delete(key);
+        });
+    }
+  });
+  const missingKey = missing.map(({ key }) => key).join(",");
   useEffect(() => {
-    if (!seriesKey || !symbol || hasSeries) return;
-    const controller = new AbortController();
-    fetchPrices(symbol, chartInterval, rate, controller.signal)
-      .then((series) => setSeriesState((previous) => addToCache(previous, seriesKey, series)))
-      .catch((error: unknown) => {
-        if (controller.signal.aborted) return;
-        setSeriesState((previous) => ({
-          ...previous,
-          error: { key: seriesKey, message: errorMessage(error) },
-        }));
-      });
-    return () => controller.abort();
-  }, [seriesKey, symbol, chartInterval, rate, hasSeries, reloadToken]);
+    startFetches();
+  }, [missingKey, reloadToken]);
+  useEffect(() => {
+    const requests = inflight.current;
+    return () => {
+      requests.forEach((controller) => controller.abort());
+      requests.clear();
+    };
+  }, []);
+
+  const seriesKey = selected ? keyOf(selected) : null;
+  const currentSeries = seriesKey ? seriesState.cache[seriesKey] : undefined;
+  const seriesError = seriesKey ? (seriesState.errors[seriesKey] ?? null) : null;
+
+  const selectSymbol = (next: string) => {
+    setSelectedSymbol(next);
+    setCompare((list) => list.filter((slot) => slot.symbol !== next));
+  };
+  const addCompare = (next: string) =>
+    setCompare((list) => {
+      const slot = nextFreeSlot(list);
+      return slot === null || list.some((c) => c.symbol === next) ? list : [...list, { symbol: next, slot }];
+    });
+  const removeCompare = (target: string) =>
+    setCompare((list) => list.filter((slot) => slot.symbol !== target));
 
   // Monthly candles: a window of days makes no sense, fall back to the latest month.
   const changeInterval = (next: Interval) => {
@@ -123,13 +174,32 @@ export default function MarketDashboard() {
     if (next === "1m" && range.unit === "day") setRange({ unit: "month", count: 1 });
   };
 
-  // "Năm" wheel length: years covered by the series on screen (the previous one while loading).
+  // "Năm" wheel length: years covered by the data on screen (the previous series while loading).
   const shownSeries =
     currentSeries ?? seriesState.cache[seriesState.order[seriesState.order.length - 1]];
-  const maxYears = yearsSpanned(shownSeries?.bars ?? []);
+  const maxYears = Math.max(
+    yearsSpanned(shownSeries?.bars ?? []),
+    ...compared.map((c) => yearsSpanned(seriesState.cache[keyOf(c.item)]?.bars ?? [])),
+  );
+
+  const compareEntries: CompareEntry[] = [
+    ...(selected ? [{ item: selected, slot: 0 }] : []),
+    ...compared,
+  ].map(({ item, slot }) => {
+    const key = keyOf(item);
+    return {
+      id: item.symbol,
+      label: baseSymbol(item),
+      slot,
+      series: seriesState.cache[key],
+      error: seriesState.errors[key] ?? null,
+      removable: slot !== 0,
+    };
+  });
+  const comparing = compared.length > 0;
 
   const retry = () => {
-    setSeriesState((previous) => ({ ...previous, error: null }));
+    setSeriesState((previous) => ({ ...previous, errors: {} }));
     setReloadToken((token) => token + 1);
   };
 
@@ -141,7 +211,7 @@ export default function MarketDashboard() {
     overlay = <ChartMessage title="Không tải được biểu đồ" detail={seriesError} onRetry={retry} />;
   } else if (!currentSeries) {
     overlay = <LoadingIndicator compact={chartHasData} />;
-  } else if (currentSeries.bars.length === 0) {
+  } else if (currentSeries.bars.length === 0 && !comparing) {
     overlay = <ChartMessage title="Chưa có dữ liệu giá cho mã này" />;
   }
 
@@ -153,7 +223,7 @@ export default function MarketDashboard() {
         tab={tab}
         onTabChange={setTab}
         selected={symbol}
-        onSelect={setSelectedSymbol}
+        onSelect={selectSymbol}
         onRetry={retry}
       />
       <main className="flex min-w-0 flex-1 flex-col md:min-h-0">
@@ -168,9 +238,24 @@ export default function MarketDashboard() {
           range={range}
           onRangeChange={setRange}
           maxYears={maxYears}
+          instruments={instruments}
+          compare={compared.map(({ symbol: s, slot }) => ({ symbol: s, slot }))}
+          onCompareAdd={addCompare}
+          onCompareRemove={removeCompare}
+          onCompareClear={() => setCompare([])}
         />
         <section aria-label="Biểu đồ giá" className="relative min-h-[420px] flex-1 md:min-h-0">
-          <PriceChart series={currentSeries} range={range} />
+          {comparing ? (
+            <CompareChart
+              entries={compareEntries}
+              interval={chartInterval}
+              range={range}
+              onRemove={removeCompare}
+              onRetry={retry}
+            />
+          ) : (
+            <PriceChart series={currentSeries} range={range} />
+          )}
           {overlay}
         </section>
       </main>

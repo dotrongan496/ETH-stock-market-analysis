@@ -76,6 +76,7 @@ class FakeMarketRepository:
                         quote_currency=inst.quote_currency,
                         trade_date=b.time if b else None,
                         close=b.close if b else None,
+                        volume=b.volume if b else None,
                     )
                 )
         return group_latest_closes(rows)
@@ -132,6 +133,12 @@ def test_instruments_default_rate(client: TestClient) -> None:
     assert btc["last_close_vnd"] == 99 * 25400  # default rate
     assert btc["change_pct"] == pytest.approx(-10.0)
 
+    # Latest session's traded quantity and its value in VND (close x volume).
+    assert fpt["last_volume"] == 2000
+    assert fpt["turnover_vnd"] == 85900 * 2000
+    assert btc["last_volume"] == 4.5
+    assert btc["turnover_vnd"] == pytest.approx(99 * 25400 * 4.5)
+
 
 def test_instruments_custom_rate(client: TestClient) -> None:
     items = {i["symbol"]: i for i in client.get("/api/instruments?usd_vnd_rate=26000").json()}
@@ -147,6 +154,8 @@ def test_instruments_without_bars_have_null_prices(client: TestClient) -> None:
     assert new["last_close"] is None
     assert new["last_close_vnd"] is None
     assert new["change_pct"] is None
+    assert new["last_volume"] is None
+    assert new["turnover_vnd"] is None
 
 
 @pytest.mark.parametrize("rate", ["0", "-1", "abc", "2000000"])
