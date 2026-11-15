@@ -4,7 +4,7 @@ import { useEffect, useState, type ReactNode } from "react";
 
 import ChartHeader from "@/components/chart-header";
 import InstrumentSidebar from "@/components/instrument-sidebar";
-import PriceChart, { type RangeKey } from "@/components/price-chart";
+import PriceChart from "@/components/price-chart";
 import {
   API_BASE_URL,
   errorMessage,
@@ -16,6 +16,7 @@ import {
   type PriceSeries,
 } from "@/lib/api";
 import { DEFAULT_USD_VND_RATE, parseRate } from "@/lib/format";
+import { DEFAULT_RANGE, yearsSpanned, type ChartRange } from "@/lib/range";
 
 /** Price series kept in memory, so flipping between symbols / intervals is instant. */
 const MAX_CACHED_SERIES = 30;
@@ -50,7 +51,7 @@ export default function MarketDashboard() {
   const [tab, setTab] = useState<AssetClass>("stock");
   const [selectedSymbol, setSelectedSymbol] = useState<string | null>(null);
   const [chartInterval, setChartInterval] = useState<Interval>("1d");
-  const [range, setRange] = useState<RangeKey>("6M");
+  const [range, setRange] = useState<ChartRange>(DEFAULT_RANGE);
   const [reloadToken, setReloadToken] = useState(0);
   const [instrumentsState, setInstrumentsState] = useState<InstrumentsState | null>(null);
   const [seriesState, setSeriesState] = useState<SeriesState>({ cache: {}, order: [], error: null });
@@ -116,6 +117,17 @@ export default function MarketDashboard() {
     return () => controller.abort();
   }, [seriesKey, symbol, chartInterval, rate, hasSeries, reloadToken]);
 
+  // Monthly candles: a window of days makes no sense, fall back to the latest month.
+  const changeInterval = (next: Interval) => {
+    setChartInterval(next);
+    if (next === "1m" && range.unit === "day") setRange({ unit: "month", count: 1 });
+  };
+
+  // "Năm" wheel length: years covered by the series on screen (the previous one while loading).
+  const shownSeries =
+    currentSeries ?? seriesState.cache[seriesState.order[seriesState.order.length - 1]];
+  const maxYears = yearsSpanned(shownSeries?.bars ?? []);
+
   const retry = () => {
     setSeriesState((previous) => ({ ...previous, error: null }));
     setReloadToken((token) => token + 1);
@@ -152,9 +164,10 @@ export default function MarketDashboard() {
           rateValid={parseRate(rateInput) !== null}
           onRateInput={setRateInput}
           interval={chartInterval}
-          onIntervalChange={setChartInterval}
+          onIntervalChange={changeInterval}
           range={range}
           onRangeChange={setRange}
+          maxYears={maxYears}
         />
         <section aria-label="Biểu đồ giá" className="relative min-h-[420px] flex-1 md:min-h-0">
           <PriceChart series={currentSeries} range={range} />

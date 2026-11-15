@@ -54,6 +54,19 @@ body {
   scrollbar-color: var(--scrollbar) transparent;
 }
 
+/* Horizontal number wheel (components/number-wheel.tsx). */
+.number-wheel {
+  scrollbar-width: none;
+  /* Lets the first item (min-w-7 = 1.75rem) reach the center marker. */
+  padding-inline: calc(50% - 0.875rem);
+  /* Numbers fade out towards the edges, like a dial. */
+  mask-image: linear-gradient(90deg, transparent, #000 28%, #000 72%, transparent);
+}
+
+.number-wheel::-webkit-scrollbar {
+  display: none;
+}
+
 /*
  * Theme switch: a wall rocker switch (components/theme-switch.tsx).
  * Dark theme = "O" side pressed, lamp off. Light theme = "I" side pressed, lamp glowing,

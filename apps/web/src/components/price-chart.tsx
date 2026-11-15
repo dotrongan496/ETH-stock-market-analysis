@@ -20,18 +20,11 @@ import { useEffect, useEffectEvent, useRef } from "react";
 
 import type { Interval, PriceBar, PriceSeries } from "@/lib/api";
 import { currentTheme, useTheme, type Theme } from "@/lib/theme";
-import {
-  formatDay,
-  formatMonth,
-  formatPrice,
-  formatVnd,
-  formatVolume,
-  shiftMonths,
-} from "@/lib/format";
+import { formatDay, formatMonth, formatPrice, formatVnd, formatVolume } from "@/lib/format";
+import { rangeStartIndex, type ChartRange } from "@/lib/range";
 
-export type RangeKey = "3M" | "6M" | "1Y" | "ALL";
-
-const RANGE_MONTHS: Record<Exclude<RangeKey, "ALL">, number> = { "3M": 3, "6M": 6, "1Y": 12 };
+/** Fewer candles than this keep this width (empty space after them) instead of stretching. */
+const MIN_VISIBLE_SLOTS = 10;
 
 // Candle colors are the same in both themes; the chart chrome follows the theme.
 const COLORS = {
@@ -127,19 +120,13 @@ function toVolume(bar: PriceBar): HistogramData<Time> {
 }
 
 /** Show the last `range` of bars, leaving a little room after the latest candle. */
-function applyRange(chart: IChartApi, bars: PriceBar[], interval: Interval, range: RangeKey) {
+function applyRange(chart: IChartApi, bars: PriceBar[], interval: Interval, range: ChartRange) {
   if (bars.length === 0) return;
   const last = bars.length - 1;
-  let first = 0;
-  if (range !== "ALL") {
-    const months = RANGE_MONTHS[range];
-    // Monthly: the last N candles. Daily: every session since the same day N months ago.
-    const from = shiftMonths(bars[last].time, interval === "1m" ? -(months - 1) : -months);
-    const index = bars.findIndex((bar) => bar.time >= from);
-    first = index === -1 ? last : index;
-  }
+  const first = rangeStartIndex(bars, interval, range);
   const padding = Math.max(1, Math.round((last - first + 1) * 0.04));
-  chart.timeScale().setVisibleLogicalRange({ from: first - 0.5, to: last + 0.5 + padding });
+  const to = Math.max(last + 0.5 + padding, first - 0.5 + MIN_VISIBLE_SLOTS);
+  chart.timeScale().setVisibleLogicalRange({ from: first - 0.5, to });
 }
 
 function setText(root: HTMLElement, field: string, text: string) {
@@ -150,7 +137,7 @@ function setText(root: HTMLElement, field: string, text: string) {
 interface PriceChartProps {
   /** Data to draw. `undefined` while loading: the previous candles stay on screen. */
   series: PriceSeries | undefined;
-  range: RangeKey;
+  range: ChartRange;
 }
 
 export default function PriceChart({ series, range }: PriceChartProps) {
