@@ -3,23 +3,54 @@
 import { useState, type ReactNode } from "react";
 
 import ChangeBadge from "@/components/change-badge";
-import type { RangeKey } from "@/components/price-chart";
+import NumberWheel, { type WheelOption } from "@/components/number-wheel";
 import SegmentedControl, { type SegmentOption } from "@/components/segmented-control";
 import type { Instrument, Interval } from "@/lib/api";
 import { formatDay, formatNumber, formatVnd, quoteDecimals } from "@/lib/format";
 import { displayName, exchangeLabel } from "@/lib/instrument";
+import {
+  UNIT_MAX,
+  describeRange,
+  switchUnit,
+  type ChartRange,
+  type RangeCount,
+  type RangeUnit,
+} from "@/lib/range";
 
 const INTERVAL_OPTIONS: ReadonlyArray<SegmentOption<Interval>> = [
   { value: "1m", label: "Theo Tháng (1M)", title: "Mỗi nến là một tháng" },
   { value: "1d", label: "Theo Ngày (1D)", title: "Mỗi nến là một phiên giao dịch" },
 ];
 
-const RANGE_OPTIONS: ReadonlyArray<SegmentOption<RangeKey>> = [
-  { value: "3M", label: "3T", title: "3 tháng gần nhất" },
-  { value: "6M", label: "6T", title: "6 tháng gần nhất" },
-  { value: "1Y", label: "1N", title: "1 năm gần nhất" },
-  { value: "ALL", label: "Tất cả", title: "Toàn bộ dữ liệu" },
-];
+const UNIT_WORD: Record<RangeUnit, string> = { day: "ngày", month: "tháng", year: "năm" };
+
+function unitOptions(interval: Interval): ReadonlyArray<SegmentOption<RangeUnit>> {
+  const monthly = interval === "1m";
+  return [
+    {
+      value: "day",
+      label: "Ngày",
+      title: monthly ? "Chọn khung nến Theo Ngày (1D) để xem theo ngày" : "Xem N ngày gần nhất",
+      disabled: monthly,
+    },
+    { value: "month", label: "Tháng", title: "Xem N tháng gần nhất" },
+    { value: "year", label: "Năm", title: "Xem N năm gần nhất" },
+  ];
+}
+
+/** 1..30 days, 1..12 months, or 1..(years of data) + "Tất cả". */
+function countOptions(unit: RangeUnit, maxYears: number): ReadonlyArray<WheelOption<RangeCount>> {
+  const max = unit === "year" ? maxYears : UNIT_MAX[unit];
+  const options: WheelOption<RangeCount>[] = Array.from({ length: max }, (_, i) => ({
+    value: i + 1,
+    label: String(i + 1),
+    title: describeRange({ unit, count: i + 1 }),
+  }));
+  if (unit === "year") {
+    options.push({ value: "all", label: "Tất cả", title: describeRange({ unit, count: "all" }) });
+  }
+  return options;
+}
 
 interface ChartHeaderProps {
   instrument: Instrument | null;
@@ -30,8 +61,10 @@ interface ChartHeaderProps {
   onRateInput: (digits: string) => void;
   interval: Interval;
   onIntervalChange: (value: Interval) => void;
-  range: RangeKey;
-  onRangeChange: (value: RangeKey) => void;
+  range: ChartRange;
+  onRangeChange: (value: ChartRange) => void;
+  /** Years of data for the shown instrument: length of the "Năm" wheel. */
+  maxYears: number;
 }
 
 export default function ChartHeader({
@@ -44,11 +77,12 @@ export default function ChartHeader({
   onIntervalChange,
   range,
   onRangeChange,
+  maxYears,
 }: ChartHeaderProps) {
   return (
     <header className="flex flex-wrap items-end justify-between gap-x-6 gap-y-4 border-b border-line px-4 py-4 sm:px-5">
       <InstrumentSummary instrument={instrument} appliedRate={appliedRate} />
-      <div className="flex flex-wrap items-end gap-3">
+      <div className="flex flex-wrap items-start gap-3">
         <RateInput value={rateInput} valid={rateValid} onChange={onRateInput} />
         <Field label="Khung nến">
           <SegmentedControl
@@ -58,14 +92,12 @@ export default function ChartHeader({
             onChange={onIntervalChange}
           />
         </Field>
-        <Field label="Khoảng thời gian">
-          <SegmentedControl
-            label="Khoảng thời gian"
-            value={range}
-            options={RANGE_OPTIONS}
-            onChange={onRangeChange}
-          />
-        </Field>
+        <RangePicker
+          range={range}
+          onChange={onRangeChange}
+          interval={interval}
+          maxYears={maxYears}
+        />
       </div>
     </header>
   );
@@ -76,6 +108,44 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
     <div className="flex flex-col gap-1">
       <span className="text-[11px] font-medium uppercase tracking-wide text-muted">{label}</span>
       {children}
+    </div>
+  );
+}
+
+/** Unit (Ngày / Tháng / Năm) on top, a horizontal number wheel below. */
+function RangePicker({
+  range,
+  onChange,
+  interval,
+  maxYears,
+}: {
+  range: ChartRange;
+  onChange: (value: ChartRange) => void;
+  interval: Interval;
+  maxYears: number;
+}) {
+  // More years than this instrument has data for shows everything anyway.
+  const count =
+    range.unit === "year" && range.count !== "all" && range.count > maxYears ? "all" : range.count;
+
+  return (
+    <div className="flex w-52 flex-col gap-1" title={describeRange({ ...range, count })}>
+      <span className="text-[11px] font-medium uppercase tracking-wide text-muted">
+        Khoảng thời gian
+      </span>
+      <SegmentedControl
+        label="Đơn vị khoảng thời gian"
+        value={range.unit}
+        options={unitOptions(interval)}
+        onChange={(unit) => onChange(switchUnit(range, unit, maxYears))}
+        fullWidth
+      />
+      <NumberWheel
+        label={`Số ${UNIT_WORD[range.unit]}`}
+        options={countOptions(range.unit, maxYears)}
+        value={count}
+        onChange={(value) => onChange({ unit: range.unit, count: value })}
+      />
     </div>
   );
 }
