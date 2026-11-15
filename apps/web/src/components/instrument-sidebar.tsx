@@ -238,11 +238,7 @@ export default function InstrumentSidebar({
 
       <div className="flex justify-between px-4 pb-1 text-[11px] font-medium uppercase tracking-wide text-muted">
         <span>
-          {searching
-            ? `Kết quả · ${pool.length}`
-            : marketView && tab === "stock"
-              ? "Mã · Trần / Sàn / TC"
-              : "Mã"}
+          {searching ? `Kết quả · ${pool.length}` : "Mã"}
         </span>
         <span>{showTurnover ? "Giá · GTGD phiên" : "Giá (VND) · Thay đổi"}</span>
       </div>
@@ -405,7 +401,7 @@ function StockTab({
           role="menu"
           aria-label="Kiểu xem cổ phiếu"
           // pt-1.5 instead of a margin: no gap where the pointer would "leave" the tab.
-          className="absolute left-0 top-full z-30 w-60 pt-1.5"
+          className="absolute left-0 top-full z-30 w-44 pt-1.5"
         >
           <div className="rounded-lg border border-line bg-panel p-1 shadow-xl shadow-black/40">
             {STOCK_VIEWS.map((option) => {
@@ -421,30 +417,19 @@ function StockTab({
                     setOpen(false);
                   }}
                   onKeyDown={onItemKey}
-                  className={`flex w-full items-start gap-2.5 rounded-md px-2.5 py-2 text-left transition-colors hover:bg-raised focus-visible:bg-raised focus-visible:outline-none ${
+                  className={`flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-left text-sm font-medium text-ink transition-colors hover:bg-raised focus-visible:bg-raised focus-visible:outline-none ${
                     checked ? "bg-raised/70" : ""
                   }`}
                 >
                   <span
                     aria-hidden
-                    className={`mt-1 grid size-3.5 shrink-0 place-items-center rounded-full border ${
+                    className={`grid size-3.5 shrink-0 place-items-center rounded-full border ${
                       checked ? "border-accent bg-accent" : "border-line"
                     }`}
                   >
                     {checked && <span className="size-1.5 rounded-full bg-canvas" />}
                   </span>
-                  <span className="min-w-0">
-                    <span className="block text-sm font-medium text-ink">{option.label}</span>
-                    {option.value === "value" ? (
-                      <span className="block text-xs text-muted">Biểu đồ nến, so sánh nhiều mã</span>
-                    ) : (
-                      <span className="flex flex-wrap gap-x-2 text-xs text-muted">
-                        <Swatch className="bg-ceil" label="Trần" />
-                        <Swatch className="bg-floor" label="Sàn" />
-                        <Swatch className="bg-flat" label="Tham chiếu" />
-                      </span>
-                    )}
-                  </span>
+                  {option.label}
                 </button>
               );
             })}
@@ -452,15 +437,6 @@ function StockTab({
         </div>
       )}
     </div>
-  );
-}
-
-function Swatch({ className, label }: { className: string; label: string }) {
-  return (
-    <span className="inline-flex items-center gap-1">
-      <span aria-hidden className={`size-2 rounded-full ${className}`} />
-      {label}
-    </span>
   );
 }
 

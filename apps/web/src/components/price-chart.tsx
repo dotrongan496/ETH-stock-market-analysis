@@ -338,9 +338,9 @@ export default function PriceChart({ series, range, view = "value" }: PriceChart
     latestLimitsRef.current = latest;
     limitLinesRef.current = latest
       ? [
-          { price: latest.ceiling, color: palette.ceil, title: "Trần" },
-          { price: latest.floor, color: palette.floor, title: "Sàn" },
-          { price: latest.reference, color: palette.ref, title: "TC" },
+          { price: latest.ceiling, color: palette.ceil },
+          { price: latest.floor, color: palette.floor },
+          { price: latest.reference, color: palette.ref },
         ].map((line) =>
           candles.createPriceLine({
             ...line,
