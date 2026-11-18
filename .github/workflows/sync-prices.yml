@@ -1,0 +1,63 @@
+name: Cập nhật giá hằng ngày
+
+# Đồng bộ giá 20 mã (cổ phiếu VN + crypto) vào database, web hiển thị ngay không cần deploy.
+# Cần secret DATABASE_URL (Settings -> Secrets and variables -> Actions), cùng giá trị như trên Render.
+# Lần chạy lỗi (mất kết nối DB, nguồn dữ liệu không trả về mã nào...) sẽ có email báo từ GitHub.
+
+on:
+  schedule:
+    # Giờ UTC; giờ Việt Nam = UTC+7. GitHub có thể chạy trễ vài phút đến vài chục phút.
+    - cron: "20 0 * * *" # 07:20 hằng ngày: chốt nến crypto hôm trước (Binance đóng nến lúc 00:00 UTC)
+    - cron: "50 8 * * 1-5" # 15:50 thứ 2-6: giá đóng cửa cổ phiếu VN (phiên kết thúc 15:00)
+  workflow_dispatch:
+    inputs:
+      days:
+        description: Số ngày gần nhất cần đồng bộ
+        default: "7"
+      dry_run:
+        description: Chỉ tải thử, không ghi vào database
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sync-prices
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Install dependencies (from uv.lock)
+        run: uv sync --locked --no-dev
+
+      - name: Sync prices
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          # 7 ngày: bù được cuối tuần, ngày lễ và vài lần chạy bị lỡ; upsert nên chạy lại không sao.
+          DAYS: ${{ inputs.days || '7' }}
+          DRY_RUN: ${{ inputs.dry_run && 'true' || 'false' }}
+        run: |
+          case "$DAYS" in
+            '' | *[!0-9]*) echo "::error::days phải là số nguyên dương"; exit 1 ;;
+          esac
+          if [ "$DRY_RUN" = "true" ]; then
+            # Dry run không mở kết nối DB nhưng settings vẫn cần một URL.
+            export DATABASE_URL="${DATABASE_URL:-postgresql+psycopg://dry-run@localhost/none}"
+            uv run python -m pipelines.providers.sync --days "$DAYS" --dry-run
+          else
+            if [ -z "$DATABASE_URL" ]; then
+              echo "::error::Chưa có secret DATABASE_URL (Settings -> Secrets and variables -> Actions)"
+              exit 1
+            fi
+            uv run python -m pipelines.providers.sync --days "$DAYS"
+          fi
