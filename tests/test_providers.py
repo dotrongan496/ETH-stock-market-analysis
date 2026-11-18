@@ -5,6 +5,7 @@ from __future__ import annotations
 import datetime as dt
 from decimal import Decimal
 import json
+import urllib.error
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -109,6 +110,40 @@ def test_binance_provider_paginates_past_limit() -> None:
     assert bars[0].trade_date == start
     assert bars[-1].trade_date == start + dt.timedelta(days=total - 1)
     assert len({b.trade_date for b in bars}) == total
+
+
+def test_binance_provider_falls_back_when_geo_blocked() -> None:
+    """api.binance.com answers 451 to US IPs: use the mirror, and keep using it."""
+    provider = BinanceProvider()
+    kline = [1767225600000, "1", "2", "0.5", "1.5", "10", 1767311999999]
+
+    def ok() -> MagicMock:
+        resp = MagicMock()
+        resp.read.return_value = json.dumps([kline]).encode("utf-8")
+        resp.__enter__.return_value = resp
+        return resp
+
+    blocked = urllib.error.HTTPError(
+        "https://api.binance.com/api/v3/klines", 451, "Unavailable For Legal Reasons", {}, None
+    )
+    with patch("urllib.request.urlopen", side_effect=[blocked, ok(), ok()]) as mock_open:
+        day = dt.date(2026, 1, 1)
+        first = provider.fetch_daily_bars("BTCUSDT", day, day)
+        second = provider.fetch_daily_bars("ETHUSDT", day, day)
+
+    urls = [call.args[0].full_url for call in mock_open.call_args_list]
+    assert urls[0].startswith("https://api.binance.com/")
+    assert urls[1].startswith("https://data-api.binance.vision/")
+    assert urls[2].startswith("https://data-api.binance.vision/")  # no second 451 round trip
+    assert len(first) == 1 and len(second) == 1
+
+
+def test_binance_provider_raises_when_all_hosts_fail() -> None:
+    provider = BinanceProvider()
+    with patch("urllib.request.urlopen", side_effect=OSError("offline")) as mock_open:
+        with pytest.raises(OSError):
+            provider.fetch_daily_bars("BTCUSDT", dt.date(2026, 1, 1), dt.date(2026, 1, 1))
+    assert mock_open.call_count == 2
 
 
 def test_vnstock_provider_mock() -> None:
