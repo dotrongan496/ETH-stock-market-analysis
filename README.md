@@ -54,6 +54,20 @@ pnpm --filter web dev        # http://localhost:3000
 | `GET /api/instruments?usd_vnd_rate=25400` | Toàn bộ mã kèm giá đóng cửa mới nhất quy đổi VND và % thay đổi so với phiên trước |
 | `GET /api/prices/{symbol}?interval=1d\|1m&usd_vnd_rate=25400` | Nến OHLCV bằng VND. `1d`: nến ngày, `1m`: gộp theo tháng. Giá USDT nhân với `usd_vnd_rate`, giá VND giữ nguyên, khối lượng không quy đổi |
 
+### Tự động cập nhật giá
+
+Workflow [`.github/workflows/sync-prices.yml`](.github/workflows/sync-prices.yml) chạy lệnh đồng bộ trên GitHub Actions (7 ngày gần nhất, upsert):
+
+| Giờ Việt Nam | Mục đích |
+|---|---|
+| 07:20 hằng ngày | Chốt nến crypto của ngày hôm trước (Binance đóng nến lúc 00:00 UTC) |
+| 15:50 thứ 2 – 6 | Giá đóng cửa cổ phiếu VN (phiên kết thúc 15:00) |
+
+- Cần secret `DATABASE_URL` trong *Settings → Secrets and variables → Actions*, cùng giá trị như trên Render.
+- Chạy tay: tab *Actions → Cập nhật giá hằng ngày → Run workflow*, hoặc `gh workflow run sync-prices.yml`. Có thể đổi số ngày, hoặc chọn *dry run* để chỉ tải thử.
+- Lần chạy lỗi sẽ có email báo từ GitHub.
+- Với repo public, GitHub sẽ tắt lịch chạy nếu repo không có commit nào trong 60 ngày. Khi đó bật lại ở tab *Actions*.
+
 ## Deploy lên tên miền riêng
 
 ```
