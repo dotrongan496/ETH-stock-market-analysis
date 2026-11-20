@@ -2,6 +2,8 @@
 
 import { useEffect, useEffectEvent, useRef, useState, type ReactNode } from "react";
 
+import AccountMenu from "@/components/account-menu";
+import AuthDialog, { type AuthReason } from "@/components/auth-dialog";
 import ChartHeader from "@/components/chart-header";
 import { ChartSkeleton, LoadingBar, StaleVeil } from "@/components/chart-loading";
 import CompareChart, { type CompareEntry } from "@/components/compare-chart";
@@ -17,6 +19,7 @@ import {
   type Interval,
   type PriceSeries,
 } from "@/lib/api";
+import { onSignedIn, setAfterSignIn, takeAfterSignIn, useAuth } from "@/lib/auth";
 import { nextFreeSlot, type CompareSlot } from "@/lib/compare";
 import { DEFAULT_USD_VND_RATE, parseRate } from "@/lib/format";
 import { baseSymbol } from "@/lib/instrument";
@@ -66,6 +69,13 @@ export default function MarketDashboard() {
   const [reloadToken, setReloadToken] = useState(0);
   const [instrumentsState, setInstrumentsState] = useState<InstrumentsState | null>(null);
   const [seriesState, setSeriesState] = useState<SeriesState>({ cache: {}, order: [], errors: {} });
+  /** Open sign-in dialog, with why it was opened; null when closed. */
+  const [authDialog, setAuthDialog] = useState<{ reason: AuthReason } | null>(null);
+
+  // Signed out: prices only. "Cổ phiếu VN → Thị trường" needs an account.
+  const auth = useAuth();
+  const signedIn = auth.status === "signedIn";
+  const effectiveView: StockView = signedIn ? stockView : "value";
 
   // Apply a typed rate once the user pauses typing.
   useEffect(() => {
@@ -106,7 +116,7 @@ export default function MarketDashboard() {
   const symbol = selected?.symbol ?? null;
 
   // "Cổ phiếu VN → Thị trường" applies to VN stocks; it has daily candles only and no comparison.
-  const marketView = stockView === "market" && selected?.asset_class === "stock";
+  const marketView = effectiveView === "market" && selected?.asset_class === "stock";
   const interval: Interval = marketView ? "1d" : chartInterval;
 
   // Instruments drawn next to the main one (never the main one itself).
@@ -209,19 +219,46 @@ export default function MarketDashboard() {
     if (next === "1m" && range.unit === "day") setRange({ unit: "month", count: 1 });
   };
 
-  // Hover menu of the "Cổ phiếu VN" tab; clicking the tab itself picks "Giá trị".
-  const chooseStockView = (view: StockView) => {
+  const showMarket = () => {
     setTab("stock");
-    setStockView(view);
-    if (view === "market") {
-      setChartInterval("1d"); // also the interval kept when going back to "Giá trị"
-      // The board needs a VN stock: leave a crypto selection for the first stock.
-      if (selected?.asset_class !== "stock") {
-        const firstStock = instruments?.find((item) => item.asset_class === "stock");
-        if (firstStock) setSelectedSymbol(firstStock.symbol);
-      }
+    setStockView("market");
+    setChartInterval("1d"); // also the interval kept when going back to "Giá trị"
+    // The board needs a VN stock: leave a crypto selection for the first stock.
+    if (selected?.asset_class !== "stock") {
+      const firstStock = instruments?.find((item) => item.asset_class === "stock");
+      if (firstStock) setSelectedSymbol(firstStock.symbol);
     }
   };
+
+  // Hover menu of the "Cổ phiếu VN" tab; clicking the tab itself picks "Giá trị".
+  const chooseStockView = (view: StockView) => {
+    if (view === "value") {
+      setTab("stock");
+      setStockView("value");
+    } else if (signedIn) {
+      showMarket();
+    } else {
+      // Signed out: ask to sign in, then open "Thị trường" (also after the Google redirect).
+      setAfterSignIn("market");
+      setAuthDialog({ reason: "market" });
+    }
+  };
+
+  const openSignIn = () => {
+    setAfterSignIn(null);
+    setAuthDialog({ reason: null });
+  };
+  const closeSignIn = () => {
+    setAfterSignIn(null);
+    setAuthDialog(null);
+  };
+
+  // A session arrived (dialog, Google redirect, confirmation link, another tab).
+  const afterSignIn = useEffectEvent(() => {
+    setAuthDialog(null);
+    if (takeAfterSignIn() === "market") showMarket();
+  });
+  useEffect(() => onSignedIn(afterSignIn), []);
 
   // "Năm" wheel length: years covered by the data on screen (the previous series while loading).
   const shownSeries =
@@ -275,8 +312,9 @@ export default function MarketDashboard() {
         error={instrumentsError}
         tab={tab}
         onTabChange={setTab}
-        stockView={stockView}
+        stockView={effectiveView}
         onStockViewChange={chooseStockView}
+        marketLocked={!signedIn}
         selected={symbol}
         onSelect={selectSymbol}
         onPrefetch={prefetch}
@@ -300,6 +338,7 @@ export default function MarketDashboard() {
           onCompareRemove={removeCompare}
           onCompareClear={() => setCompare([])}
           marketView={marketView}
+          account={<AccountMenu onSignIn={openSignIn} />}
         />
         <section aria-label="Biểu đồ giá" className="relative min-h-[420px] flex-1 md:min-h-0">
           {comparing ? (
@@ -321,6 +360,11 @@ export default function MarketDashboard() {
           {loading && <LoadingBar />}
         </section>
       </main>
+      <AuthDialog
+        open={authDialog !== null && !signedIn}
+        reason={authDialog?.reason ?? null}
+        onClose={closeSignIn}
+      />
     </div>
   );
 }

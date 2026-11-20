@@ -85,6 +85,8 @@ interface ChartHeaderProps {
   onCompareClear: () => void;
   /** "Cổ phiếu VN → Thị trường": board colors and price limits, daily candles only. */
   marketView: boolean;
+  /** Sign-in button / avatar, pinned to the top-right corner. */
+  account: ReactNode;
 }
 
 export default function ChartHeader({
@@ -104,10 +106,14 @@ export default function ChartHeader({
   onCompareRemove,
   onCompareClear,
   marketView,
+  account,
 }: ChartHeaderProps) {
+  // Grid: the account sits in the top-right corner. Wide screens: summary on the left, account
+  // above the controls on the right. Narrower: summary + account, then the controls below.
   return (
-    <header className="flex flex-wrap items-end justify-between gap-x-6 gap-y-4 border-b border-line px-4 py-4 sm:px-5">
-      <div className="min-w-0">
+    <header className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-6 gap-y-4 border-b border-line px-4 py-4 sm:px-5 xl:gap-y-3">
+      <div className="col-start-2 row-start-1 justify-self-end">{account}</div>
+      <div className="col-start-1 row-start-1 min-w-0 xl:row-span-2">
         <InstrumentSummary
           instrument={instrument}
           appliedRate={appliedRate}
@@ -125,7 +131,7 @@ export default function ChartHeader({
           />
         )}
       </div>
-      <div className="flex flex-wrap items-start gap-3">
+      <div className="col-span-2 flex flex-wrap items-start gap-3 xl:col-span-1 xl:col-start-2 xl:row-start-2 xl:justify-end xl:self-end">
         <RateInput value={rateInput} valid={rateValid} onChange={onRateInput} />
         <Field label="Khung nến">
           <SegmentedControl

@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 
 import ChangeBadge from "@/components/change-badge";
+import Logo from "@/components/logo";
 import ThemeSwitch from "@/components/theme-switch";
 import type { AssetClass, Instrument } from "@/lib/api";
 import { formatCompactVnd, formatPrice, formatVnd } from "@/lib/format";
@@ -46,6 +47,8 @@ interface InstrumentSidebarProps {
   /** View of the "Cổ phiếu VN" tab; choosing one also opens that tab. */
   stockView: StockView;
   onStockViewChange: (view: StockView) => void;
+  /** Signed out: "Thị trường" shows a lock and asks to sign in. */
+  marketLocked?: boolean;
   selected: string | null;
   onSelect: (symbol: string) => void;
   /** Pointer / focus resting on a row (null when it leaves): load that chart ahead of a click. */
@@ -60,6 +63,7 @@ export default function InstrumentSidebar({
   onTabChange,
   stockView,
   onStockViewChange,
+  marketLocked = false,
   selected,
   onSelect,
   onPrefetch,
@@ -161,6 +165,7 @@ export default function InstrumentSidebar({
         <StockTab
           active={tab === "stock" && !searching}
           view={stockView}
+          marketLocked={marketLocked}
           onChoose={(view) => {
             setQuery("");
             onStockViewChange(view);
@@ -301,10 +306,12 @@ export default function InstrumentSidebar({
 function StockTab({
   active,
   view,
+  marketLocked,
   onChoose,
 }: {
   active: boolean;
   view: StockView;
+  marketLocked: boolean;
   onChoose: (view: StockView) => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -434,6 +441,12 @@ function StockTab({
                     {checked && <span className="size-1.5 rounded-full bg-canvas" />}
                   </span>
                   {option.label}
+                  {marketLocked && option.value === "market" && (
+                    <span className="ml-auto text-muted" title="Đăng nhập để xem">
+                      <LockIcon />
+                      <span className="sr-only">(cần đăng nhập)</span>
+                    </span>
+                  )}
                 </button>
               );
             })}
@@ -576,14 +589,11 @@ function ListSkeleton() {
   );
 }
 
-function Logo() {
+function LockIcon() {
   return (
-    <svg viewBox="0 0 32 32" className="size-8 shrink-0" aria-hidden>
-      <rect width="32" height="32" rx="8" fill="#161b25" />
-      <path d="M11 7v18" stroke="#22c55e" strokeWidth="2" strokeLinecap="round" />
-      <rect x="8" y="11" width="6" height="9" rx="1.5" fill="#22c55e" />
-      <path d="M21 6v19" stroke="#ef4444" strokeWidth="2" strokeLinecap="round" />
-      <rect x="18" y="13" width="6" height="8" rx="1.5" fill="#ef4444" />
+    <svg viewBox="0 0 16 16" aria-hidden className="size-3.5">
+      <rect x="3" y="7" width="10" height="7" rx="1.5" fill="none" stroke="currentColor" strokeWidth="1.4" />
+      <path d="M5.5 7V5a2.5 2.5 0 015 0v2" fill="none" stroke="currentColor" strokeWidth="1.4" />
     </svg>
   );
 }
