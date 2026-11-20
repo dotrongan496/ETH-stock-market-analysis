@@ -68,6 +68,38 @@ Workflow [`.github/workflows/sync-prices.yml`](.github/workflows/sync-prices.yml
 - Lần chạy lỗi sẽ có email báo từ GitHub.
 - Với repo public, GitHub sẽ tắt lịch chạy nếu repo không có commit nào trong 60 ngày. Khi đó bật lại ở tab *Actions*.
 
+### Đăng nhập (Supabase Auth)
+
+| | Xem được |
+|---|---|
+| Chưa đăng nhập | Giá cổ phiếu và crypto (chế độ *Giá trị*, so sánh mã) |
+| Đã đăng nhập | Thêm chế độ *Cổ phiếu VN → Thị trường* (trần / sàn / tham chiếu) |
+
+Có đăng ký bằng email + mật khẩu (xác thực qua email), đăng nhập bằng Google và đăng xuất. Phiên đăng nhập được lưu trong trình duyệt và tự gia hạn, nên vẫn còn đăng nhập cho đến khi người dùng bấm *Đăng xuất*. Code nằm ở `apps/web/src/lib/auth.ts`, `components/auth-dialog.tsx`, `components/account-menu.tsx` và `app/auth/callback/`.
+
+Cấu hình một lần:
+
+1. **Biến môi trường của web.** Trên Vercel: *Settings → Environment Variables*, sau đó Redeploy. Chạy ở máy: thêm vào `apps/web/.env.local`.
+   - `NEXT_PUBLIC_SUPABASE_URL` = `https://<project-ref>.supabase.co`
+   - `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`: lấy ở Supabase → *Project Settings → API Keys → Publishable key* (`sb_publishable_…`), hoặc dùng *anon key* cũ.
+
+   Hai giá trị này là khóa công khai nên được phép đưa vào trình duyệt. **Không** dùng *secret key* hay *service_role*.
+2. **Supabase → Authentication → URL Configuration.**
+   - *Site URL*: `https://<tên-miền-web>`
+   - *Redirect URLs*: `https://<tên-miền-web>/auth/callback` và `http://localhost:3000/auth/callback`
+3. **Email.** Ở *Authentication → Sign In / Providers → Email*: bật *Confirm email* và đặt độ dài mật khẩu tối thiểu là 8 cho khớp với form.
+4. **SMTP.** Ở *Authentication → Emails → SMTP Settings*, cấu hình máy chủ gửi mail riêng (Resend, Brevo, Gmail App Password…). Dịch vụ email mặc định của Supabase chỉ gửi tới thành viên trong team của project và mỗi giờ chỉ gửi được vài email.
+5. **Mẫu email (khuyên dùng).** Ở *Authentication → Emails → Confirm signup*, đổi đường link trong thư thành:
+   `{{ .RedirectTo }}?token_hash={{ .TokenHash }}&type=email`
+   Như vậy người dùng mở thư trên điện thoại hay trình duyệt khác vẫn đăng nhập được. Nếu giữ link mặc định thì email vẫn được xác thực, nhưng người dùng phải đăng nhập lại khi mở thư ở trình duyệt khác với lúc đăng ký.
+6. **Google.** Trong Google Cloud Console → *APIs & Services*:
+   - Tạo *OAuth consent screen*.
+   - Vào *Credentials → Create OAuth client ID → Web application*.
+   - *Authorized JavaScript origins*: `https://<tên-miền-web>`
+   - *Authorized redirect URIs*: `https://<project-ref>.supabase.co/auth/v1/callback`
+
+   Sau đó copy *Client ID* và *Client secret* vào Supabase → *Authentication → Sign In / Providers → Google*, rồi bật Google lên.
+
 ## Deploy lên tên miền riêng
 
 ```
